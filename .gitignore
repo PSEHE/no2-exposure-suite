@@ -1,0 +1,28 @@
+# Python
+__pycache__/
+*.py[cod]
+*.egg-info/
+.venv/
+venv/
+.ipynb_checkpoints/
+
+# Node / Vite (explorer)
+node_modules/
+explorer/dist/
+explorer/.vite/
+*.log
+
+# OS
+.DS_Store
+
+# Large source data is read from the original CONTAM project folders via
+# core/config.py (NOT copied into the repo). See README.
+# The trimmed, widget-ready JSON in web_data/ IS committed so the explorer
+# can be built without the multi-GB source data.
+*.pkl
+!web_data/**
+
+# Secrets (e.g. property-data API keys for the optional Tier-2 address lookup)
+.env
+.env.*
+secrets.json
