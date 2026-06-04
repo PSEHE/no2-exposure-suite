@@ -193,6 +193,7 @@
     <form class="addr-form" onsubmit={(e) => { e.preventDefault(); applyLocation() }}>
       <span class="addr-icon" aria-hidden="true">📍</span>
       <input class="addr-input" type="text" autocomplete="off"
+             aria-label="Your address or ZIP code"
              placeholder="Enter your address or ZIP code to personalize…"
              bind:value={addrQuery} />
       <button class="addr-btn" type="submit" disabled={geoLoading}>
@@ -237,7 +238,7 @@
           <span class="seg-label">Outdoor NO₂ near you</span>
           <span class="seg-hint">{fmt(outdoor)} ppb{location ? ' · from your ZIP (adjustable)' : ' · enter an address above to set this'}</span>
         </div>
-        <input type="range" min="0" max="35" step="0.5" bind:value={outdoor} />
+        <input type="range" min="0" max="35" step="0.5" bind:value={outdoor} aria-label="Outdoor NO2, ppb" />
       </div>
 
       <button class="adv-toggle" onclick={() => (advanced = !advanced)}>
@@ -348,6 +349,32 @@
     </section>
   </main>
 
+  <details class="about card">
+    <summary>About this tool &amp; how to read it</summary>
+    <div class="about-body">
+      <p><strong>What it shows.</strong> Estimated indoor nitrogen dioxide (NO₂) exposure from a gas or
+      propane stove, combined with the outdoor NO₂ that seeps into your home. NO₂ is a respiratory
+      irritant linked to childhood asthma and other harms; there is no clearly safe level.</p>
+      <p><strong>Where the numbers come from.</strong> They are exact results from a multizone
+      <a href="https://www.nist.gov/services-resources/software/contam" target="_blank" rel="noopener">CONTAM</a>
+      airflow-and-contaminant model run across 24 representative U.S. homes and a full grid of cooking,
+      ventilation, and weather conditions — the same modeling published in
+      <a href="https://www.science.org/doi/10.1126/sciadv.adm8680" target="_blank" rel="noopener">Kashtan et al., Sci. Adv. 2024</a>
+      and <a href="https://doi.org/10.1093/pnasnexus/pgaf341" target="_blank" rel="noopener">PNAS Nexus 2025</a>.
+      Your address sets the local outdoor NO₂, climate, and a representative home for your ZIP code;
+      outdoor NO₂ is combined with indoor sources using the modeled infiltration fraction.</p>
+      <p><strong>Exact vs. illustrative.</strong> The headline numbers (annual average, worst 1-hour) are
+      taken directly from the model. The 24-hour curve and the house cross-section show the realistic
+      <em>shape</em> of how NO₂ builds up and spreads, scaled to the exact modeled peak — they illustrate
+      the dynamics rather than predict a specific day. The “fine-tune” sliders scale the result with
+      simple, transparent physics around the exact model point.</p>
+      <p><strong>Limits.</strong> Your home is matched to one of 24 archetypes, so it won't capture every
+      detail of your specific dwelling. Estimates cover NO₂ only (gas stoves also emit other pollutants),
+      and assume typical behavior patterns. Benchmarks shown: WHO annual 10 µg/m³ (≈5.3 ppb), WHO/EPA
+      1-hour ≈100 ppb. Address lookup uses OpenStreetMap.</p>
+    </div>
+  </details>
+
   <footer class="foot">
     Estimates use exact CONTAM model results for the chosen scenario; the 24-hour curve is an
     anchored physical illustration. Built on Kashtan et al. 2024/2025. Address lookup ©
@@ -444,6 +471,17 @@
     .help-row { grid-template-columns: 1fr auto auto; }
     .help-bar { display: none; }
   }
+
+  .about { margin-top: 18px; padding: 4px 20px; }
+  .about summary {
+    cursor: pointer; font-weight: 650; font-size: 14px; padding: 14px 0;
+    list-style: none; color: var(--ink);
+  }
+  .about summary::-webkit-details-marker { display: none; }
+  .about summary::before { content: '▸ '; color: var(--accent); }
+  .about[open] summary::before { content: '▾ '; }
+  .about-body { padding: 0 0 16px; display: flex; flex-direction: column; gap: 10px; max-width: 860px; }
+  .about-body p { font-size: 13.5px; color: var(--ink-2); line-height: 1.6; }
 
   .foot { margin-top: 26px; font-size: 11.5px; color: var(--muted); text-align: center; line-height: 1.6; }
 </style>

@@ -43,10 +43,15 @@ Living document. Checkboxes track progress; edit freely.
 - [x] On lookup: auto-set outdoor NO₂ + representative home; everything still adjustable
 - [x] Dual worst-hour readout (kitchen air vs personal); graceful errors + clear/manual fallback
 - Note: single-file build now 6.6 MB / 1.2 MB gz (ZIP table inlined) — trim in 1d
-### 1d. Polish
-- [ ] Plain-language interpretation + guidance copy
-- [ ] Mobile, accessibility, performance (payload optimization)
-- [ ] Branding pass; deploy to GitHub Pages
+### 1d. Polish  ⏳ (deploy pending confirmation)
+- [x] Plain-language interpretation + guidance copy
+- [x] Mobile, accessibility (contrast, focus-visible, reduced-motion, aria), performance
+- [x] Payload optimization (zip_data 4.8→3.2 MB; single-file build 1.2→0.89 MB gz)
+- [x] About / methods section (data sources, exact-vs-illustrative, limits, citations)
+- [x] Neutral/academic branding pass + OpenStreetMap attribution
+- [x] Deploy: GitHub Pages from `docs/` on `main` (PSEHE/no2-exposure-suite, public).
+      Rebuild with `npm run build --prefix explorer && cp explorer/dist/index.html docs/`.
+      (A GitHub Actions auto-deploy can be added later once the token has `workflow` scope.)
 - [ ] (Optional) Address Tier 2: property-data API + serverless proxy
 
 ## Phase 2 — CONTAM-Lite engine + validation

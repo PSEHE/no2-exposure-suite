@@ -98,17 +98,17 @@ def build_zip_data():
     out = {}
     for _, r in df.iterrows():
         z = int(r["ZIP"])
+        # Trimmed to exactly what the Explorer needs (keeps the single-file
+        # build small). lat/lon, climate label, and gas-prevalence are dropped;
+        # Product 2 reads those from the full source tables instead.
         out[str(z)] = {
             "o": _round_sig(_num(r["no2_ppb"]), 4),          # outdoor NO2 (ppb)
             "wt": r["winter_temp"], "st": r["summer_temp"],   # seasonal temp categories
             "w": [_round_sig(_num(r["still"]), 3),            # wind [still, breeze, windy]
                   _round_sig(_num(r["breeze"]), 3),
                   _round_sig(_num(r["windy_grouped"]), 3)],
-            "cl": r["DOE Climate Zone"],
             "c": r["city"], "s": r["STATE"],
-            "la": _round_sig(_num(r["lat"]), 6), "lo": _round_sig(_num(r["lon"]), 6),
             "arch": _default_archetype(r),                    # default floorplan for this ZIP
-            "gas": _round_sig(_num(r["cooking_NG"]) + _num(r["cooking_Propane"]), 3),
         }
     return out
 
