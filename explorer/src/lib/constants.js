@@ -61,6 +61,17 @@ export const WIND_OPTIONS = [
 // National wind distribution when windows can be open (paper, NOAA normals).
 export const NATIONAL_WIND_WEIGHTS = { STILL: 0.083, BREEZE: 0.608, WINDY: 0.308 }
 
+// Fraction of at-home time spent OUTDOORS per occupancy schedule (= outdoor
+// hours / non-away hours, from the Occupancy CSVs). During this time the
+// person breathes full outdoor NO2; the rest is penetrated outdoor + stove.
+export const OUTDOOR_FRACTION = {
+  fifth_kitchen: 0.0617, // 1.08 / 17.5 h
+  median: 0.0617,
+  ninetyfifth_kitchen: 0.0617,
+  fifth_outside: 0.0046, // 0.08 / 17.5 h
+  ninetyfifth_outside: 0.3542, // 8.5 / 24 h (no away time)
+}
+
 // Human-readable archetype groups for the home picker.
 export const TYPE_GROUPS = [
   { type: 'DH', label: 'Single-family detached' },

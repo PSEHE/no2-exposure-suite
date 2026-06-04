@@ -4,6 +4,12 @@
 // stored CONTAM result.
 
 import library from '@data/scenario_library.json'
+import { OUTDOOR_FRACTION } from './constants.js'
+
+const clamp = (x, lo, hi) => Math.max(lo, Math.min(hi, x))
+// Fixed cooking reference used to measure the window's ventilation response
+// for outdoor penetration (so penetration is independent of the selected use).
+const PEN_REF_USE = 'high'
 
 const S = library.schema
 
@@ -47,10 +53,21 @@ export function lookup(house, hood, use, win, temp, wind, oc) {
 }
 
 // Annual-representative exposure: average the exact scenarios over a set of
-// temperature and wind weights, then add the outdoor contribution via the
-// CONTA penetration fraction (outdoor indoor = CONTA/100 * outdoor_NO2).
+// temperature and wind weights, then add the outdoor contribution.
+//
+// Outdoor handling (per the physics): while OUTDOORS the person breathes the
+// full outdoor concentration; while INDOORS they breathe a penetrated fraction.
+// To keep ventilation monotonic (opening windows lowers exposure under clean
+// outdoor), the indoor penetration is recomputed from the SAME air exchange
+// that dilutes the stove:
+//     pen(win) = 1 - (1 - pen_closed) * [stove(win) / stove(closed)]
+// where pen_closed is calibrated from the closed-window CONTA tracer. So
+// penetration only rises when the stove actually dilutes. Then:
+//     outdoor_attributable = outdoor * [ (1 - f_out) * pen + f_out ]
+// with f_out the fraction of at-home time spent outdoors (full outdoor).
 //   temps: [[token, weight], ...]   winds: [[token, weight], ...]
 export function weightedExposure({ house, hood, use, win, oc, temps, winds, outdoorNO2 = 0 }) {
+  const fout = OUTDOOR_FRACTION[oc] ?? 0
   let stoveLong = 0, outdoorLong = 0, stoveHrW = 0
   let stoveHrMax = 0, stove8Max = 0, peakMax = 0, wsum = 0
   for (const [t, tw] of temps) {
@@ -58,8 +75,20 @@ export function weightedExposure({ house, hood, use, win, oc, temps, winds, outd
       const c = tw * ww
       if (!c) continue
       const r = lookup(house, hood, use, win, t, wd, oc)
+      // Outdoor penetration is a building/ventilation property — independent of
+      // the stove fuel/use. Derive its window-response from a fixed cooking
+      // reference ('high'), so switching to electric (use='zero') doesn't change
+      // it, and it stays monotonic. CONTA is itself use-independent.
+      const refWin = lookup(house, hood, PEN_REF_USE, win, t, wd, oc)
+      const refClosed = lookup(house, hood, PEN_REF_USE, 'closed', t, wd, oc)
+      const penClosed = clamp((refClosed.conta.dayavg / 100 - fout) / (1 - fout), 0, 1)
+      const R = refClosed.no2.dayavg > 1e-9
+        ? clamp(refWin.no2.dayavg / refClosed.no2.dayavg, 0, 1) // stove dilution ratio
+        : 1
+      const pen = clamp(1 - (1 - penClosed) * R, 0, 1)
+      const outdoorAttr = outdoorNO2 * ((1 - fout) * pen + fout)
       stoveLong += r.no2.dayavg * c
-      outdoorLong += (c * outdoorNO2 * r.conta.dayavg) / 100
+      outdoorLong += outdoorAttr * c
       stoveHrW += r.no2.hravg * c
       stoveHrMax = Math.max(stoveHrMax, r.no2.hravg)
       stove8Max = Math.max(stove8Max, r.no2.eighthravg)

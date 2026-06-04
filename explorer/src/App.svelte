@@ -361,8 +361,10 @@
       ventilation, and weather conditions — the same modeling published in
       <a href="https://www.science.org/doi/10.1126/sciadv.adm8680" target="_blank" rel="noopener">Kashtan et al., Sci. Adv. 2024</a>
       and <a href="https://doi.org/10.1093/pnasnexus/pgaf341" target="_blank" rel="noopener">PNAS Nexus 2025</a>.
-      Your address sets the local outdoor NO₂, climate, and a representative home for your ZIP code;
-      outdoor NO₂ is combined with indoor sources using the modeled infiltration fraction.</p>
+      Your address sets the local outdoor NO₂, climate, and a representative home for your ZIP code.
+      Outdoor NO₂ is combined with indoor sources by occupancy: you breathe <em>full</em> outdoor air
+      during the hours you're outside, and a reduced, ventilation-consistent <em>penetrated</em> fraction
+      while indoors (so opening windows to clean outdoor air lowers your exposure).</p>
       <p><strong>Exact vs. illustrative.</strong> The headline numbers (annual average, worst 1-hour) are
       taken directly from the model. The 24-hour curve and the house cross-section show the realistic
       <em>shape</em> of how NO₂ builds up and spreads, scaled to the exact modeled peak — they illustrate
