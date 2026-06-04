@@ -1,0 +1,77 @@
+:root {
+  /* Neutral / academic palette: clean light surface, restrained ink + accent */
+  --bg: #f6f7f9;
+  --surface: #ffffff;
+  --surface-2: #f0f2f5;
+  --ink: #1c2530;
+  --ink-2: #46535f;
+  --muted: #8793a0;
+  --line: #e2e6ea;
+  --line-2: #d3d9df;
+
+  --accent: #1f6feb;        /* interactive blue */
+  --accent-soft: #e8f0fe;
+  --stove: #e8743b;         /* stove-attributable (warm) */
+  --outdoor: #6b9bd1;       /* outdoor-attributable (cool) */
+
+  --good: #2f9e57;
+  --warn: #e0a008;
+  --bad: #d6453d;
+
+  --shadow: 0 1px 2px rgba(20,30,40,.04), 0 4px 16px rgba(20,30,40,.06);
+  --radius: 14px;
+  --font: "Inter", -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, Helvetica, Arial, sans-serif;
+  --mono: "SF Mono", ui-monospace, "Roboto Mono", Menlo, Consolas, monospace;
+}
+
+* { box-sizing: border-box; }
+html, body { margin: 0; padding: 0; }
+body {
+  background: var(--bg);
+  color: var(--ink);
+  font-family: var(--font);
+  font-size: 15px;
+  -webkit-font-smoothing: antialiased;
+  line-height: 1.5;
+}
+#app { min-height: 100vh; }
+
+h1, h2, h3 { font-weight: 660; letter-spacing: -0.015em; margin: 0; }
+p { margin: 0; }
+a { color: var(--accent); text-decoration: none; }
+a:hover { text-decoration: underline; }
+
+.tnum { font-variant-numeric: tabular-nums; }
+.muted { color: var(--muted); }
+
+/* Cards */
+.card {
+  background: var(--surface);
+  border: 1px solid var(--line);
+  border-radius: var(--radius);
+  box-shadow: var(--shadow);
+}
+
+/* Range input baseline styling */
+input[type="range"] {
+  -webkit-appearance: none; appearance: none;
+  width: 100%; height: 4px; border-radius: 4px;
+  background: var(--line-2); outline: none; cursor: pointer;
+}
+input[type="range"]::-webkit-slider-thumb {
+  -webkit-appearance: none; appearance: none;
+  width: 18px; height: 18px; border-radius: 50%;
+  background: var(--accent); border: 3px solid #fff;
+  box-shadow: 0 1px 4px rgba(31,111,235,.4);
+}
+input[type="range"]::-moz-range-thumb {
+  width: 16px; height: 16px; border-radius: 50%;
+  background: var(--accent); border: 3px solid #fff;
+}
+
+select {
+  font-family: inherit; font-size: 14px; color: var(--ink);
+  background: var(--surface); border: 1px solid var(--line-2);
+  border-radius: 9px; padding: 9px 11px; width: 100%; cursor: pointer;
+}
+select:focus { outline: 2px solid var(--accent-soft); border-color: var(--accent); }

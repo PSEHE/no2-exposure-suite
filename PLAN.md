@@ -25,16 +25,17 @@ Living document. Checkboxes track progress; edit freely.
 - [x] Generate `web_data/` (scenario_library 3.1 MB, zip_data 4.8 MB, archetypes) and commit
 
 ## Phase 1 — Explorer (public widget)
-### 1a. Scaffold + exact-lookup MVP
-- [ ] Vite + Svelte + D3 project; single-file build config
-- [ ] Design system (neutral/academic): typography, palette, layout, responsive shell
-- [ ] Load embedded scenario library; port lookup + ZIP-weighting + archetype selection to JS
-- [ ] Manual home picker + behavioral controls (hood, stove use, window, time-in-kitchen)
-- [ ] Hero exposure readout + benchmark gauge (WHO / EPA)
-### 1b. Graphics + live solver
-- [ ] Animated 24-h concentration time-series (kitchen vs bedroom)
+### 1a. Scaffold + exact-lookup MVP  ✅
+- [x] Vite + Svelte 5 + D3 project; single-file build (2.8 MB / 505 KB gzip)
+- [x] Design system (neutral/academic): light theme, tokens, responsive shell
+- [x] Load embedded scenario library; port lookup + ZIP-weighting + archetype selection to JS
+- [x] Manual home picker (24 archetypes) + behavioral controls (hood, use, window, time-in-kitchen)
+- [x] Hero exposure readouts + benchmark bar (WHO / Canada) + red/green over-states
+### 1b. Graphics + live solver  ⏳ (partly done)
+- [x] 24-h concentration time-series (kitchen vs bedroom) anchored to exact kitchen-air peak
+- [x] Cooking-period shading + adaptive y-axis + 1-hr benchmark line
 - [ ] House cross-section concentration visual
-- [ ] Anchored box-model for continuous knobs (emission/# burners/cook minutes, kitchen & home size, outdoor NO₂, hood capture %, air-exchange)
+- [ ] Expose continuous knobs as controls (emission/# burners/cook minutes, kitchen & home size, air-exchange)
 - [ ] "Switch to electric / turn on the hood" before-after comparison
 ### 1c. Address Tier 1
 - [ ] Address input → US Census geocoder → ZIP
