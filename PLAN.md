@@ -49,8 +49,9 @@ Living document. Checkboxes track progress; edit freely.
 - [x] Payload optimization (zip_data 4.8→3.2 MB; single-file build 1.2→0.89 MB gz)
 - [x] About / methods section (data sources, exact-vs-illustrative, limits, citations)
 - [x] Neutral/academic branding pass + OpenStreetMap attribution
-- [x] Deploy: GitHub Pages from `docs/` on `main` (PSEHE/no2-exposure-suite, public).
-      Rebuild with `npm run build --prefix explorer && cp explorer/dist/index.html docs/`.
+- [x] Deploy: **LIVE at https://psehe.github.io/no2-exposure-suite/** — GitHub Pages
+      from `docs/` on `main` (PSEHE/no2-exposure-suite, public).
+      Rebuild + redeploy: `npm run build --prefix explorer && cp explorer/dist/index.html docs/ && git commit -am "rebuild" && git push`.
       (A GitHub Actions auto-deploy can be added later once the token has `workflow` scope.)
 - [ ] (Optional) Address Tier 2: property-data API + serverless proxy
 
