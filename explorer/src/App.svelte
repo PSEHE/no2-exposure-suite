@@ -7,6 +7,8 @@
     TYPE_GROUPS, NATIONAL_WIND_WEIGHTS, DEFAULT_OUTDOOR_PPB, BENCHMARKS,
   } from '@lib/constants.js'
   import { fmt, times } from '@lib/format.js'
+  import { zipLookup } from '@lib/zips.js'
+  import { resolveToZip } from '@lib/geocode.js'
   import Segmented from './components/Segmented.svelte'
   import BenchmarkBar from './components/BenchmarkBar.svelte'
   import TimeSeries from './components/TimeSeries.svelte'
@@ -21,6 +23,33 @@
   let temp = $state('RT')
   let outdoor = $state(DEFAULT_OUTDOOR_PPB)
   let advanced = $state(false)
+
+  // --- location (address / ZIP personalization) ---
+  let addrQuery = $state('')
+  let location = $state(null) // {zip, city, state, o, wt, st, w, arch, label}
+  let geoLoading = $state(false)
+  let geoError = $state('')
+
+  async function applyLocation() {
+    geoError = ''
+    if (!addrQuery.trim()) return
+    geoLoading = true
+    try {
+      const { zip, label } = await resolveToZip(addrQuery)
+      const z = zipLookup(zip)
+      if (!z) throw new Error(`We don't have data for ZIP ${zip}.`)
+      location = { zip, label, city: z.c, state: z.s, o: z.o, wt: z.wt, st: z.st, w: z.w, arch: z.arch }
+      // Personalize: outdoor NO2 + a representative home for this ZIP.
+      outdoor = z.o
+      if (archetypes[z.arch]) house = z.arch
+    } catch (e) {
+      geoError = e.message || 'Lookup failed.'
+      location = null
+    } finally {
+      geoLoading = false
+    }
+  }
+  function clearLocation() { location = null; geoError = ''; addrQuery = '' }
 
   // --- home picker options, grouped by type, with a friendly size label ---
   function sizeLabel(v) {
@@ -41,7 +70,23 @@
   let arche = $derived(archetypes[house])
   let kvol = $derived(arche?.kitchen_volume_m3 ?? 30)
 
-  const winds = Object.entries(NATIONAL_WIND_WEIGHTS)
+  const nationalWinds = Object.entries(NATIONAL_WIND_WEIGHTS)
+  // Climate weighting: when a location is set, average over the ZIP's winter +
+  // summer temperatures (50/50) and its wind distribution; otherwise use the
+  // manually-chosen temperature + the national wind distribution.
+  let expTemps = $derived(
+    location
+      ? location.wt === location.st
+        ? [[location.wt, 1]]
+        : [[location.wt, 0.5], [location.st, 0.5]]
+      : [[temp, 1]]
+  )
+  let expWinds = $derived(
+    location
+      ? [['STILL', location.w[0]], ['BREEZE', location.w[1]], ['WINDY', location.w[2]]]
+      : nationalWinds
+  )
+  let curveTemp = $derived(location ? location.wt : temp)
 
   // --- fine-tune (continuous) knobs; 1.0 = exact CONTAM scenario ---
   let cookMult = $state(1) // cooking amount × default
@@ -53,7 +98,7 @@
   // zone the steady-state concentration ∝ emission, ∝ 1/volume, ∝ 1/(air-
   // exchange + decay). Equals 1 at default knob positions, so we stay exactly
   // on the CONTAM value and scale physically off-grid.
-  let lambda0 = $derived(airExchange(win, temp, 'BREEZE'))
+  let lambda0 = $derived(airExchange(win, curveTemp, 'BREEZE'))
   let stoveMult = $derived(
     cookMult * (1 / volMult) * ((lambda0 + DECAY) / (lambda0 * airMult + DECAY))
   )
@@ -62,22 +107,23 @@
   // Personal exposure (chosen time-in-kitchen) and kitchen-air metrics
   // (high-kitchen-occupancy scenario, where personal exposure ≈ kitchen air).
   let exp = $derived(
-    weightedExposure({ house, hood, use, win, oc, temps: [[temp, 1]], winds, outdoorNO2: outdoor })
+    weightedExposure({ house, hood, use, win, oc, temps: expTemps, winds: expWinds, outdoorNO2: outdoor })
   )
   let kitchenExp = $derived(
-    weightedExposure({ house, hood, use, win, oc: 'ninetyfifth_kitchen', temps: [[temp, 1]], winds, outdoorNO2: outdoor })
+    weightedExposure({ house, hood, use, win, oc: 'ninetyfifth_kitchen', temps: expTemps, winds: expWinds, outdoorNO2: outdoor })
   )
 
   // --- headline values (stove component scaled by the fine-tune multiplier) ---
   let stoveLong = $derived(exp.stoveLong * stoveMult)
   let annual = $derived(stoveLong + exp.outdoorLong)
-  let worstHr = $derived(kitchenExp.stoveHrMax * stoveMult + kitchenExp.outdoorLong)
+  let kitchenWorstHr = $derived(kitchenExp.stoveHrMax * stoveMult + kitchenExp.outdoorLong)
+  let personalWorstHr = $derived(exp.stoveHrMax * stoveMult + exp.outdoorLong)
   let whoX = $derived(annual / BENCHMARKS.whoAnnual)
 
   // --- 24-h kitchen time-series, anchored to the exact (tuned) kitchen peak ---
   let ts = $derived(
     simulateDay({
-      use, hood, win, temp, wind: 'BREEZE',
+      use, hood, win, temp: curveTemp, wind: 'BREEZE',
       kitchenVol: kvol * volMult, outdoorNO2: outdoor, peakAnchor: kitchenExp.peakMax * stoveMult,
     })
   )
@@ -87,7 +133,7 @@
     const annualOf = (mods) => {
       const e = weightedExposure({
         house, hood: mods.hood ?? hood, use: mods.use ?? use, win: mods.win ?? win,
-        oc, temps: [[temp, 1]], winds, outdoorNO2: outdoor,
+        oc, temps: expTemps, winds: expWinds, outdoorNO2: outdoor,
       })
       const sm = mods.use === 'zero' ? 0 : stoveMult
       return e.stoveLong * sm + e.outdoorLong
@@ -128,8 +174,8 @@
     } else {
       out.push(`That stays below the WHO annual guideline (${fmt(BENCHMARKS.whoAnnual)} ppb).`)
     }
-    if (worstHr > BENCHMARKS.epa1hr) {
-      out.push(`During cooking, kitchen NO₂ can exceed the 1-hour health benchmark of 100 ppb (peak ≈ ${fmt(worstHr)} ppb).`)
+    if (kitchenWorstHr > BENCHMARKS.epa1hr) {
+      out.push(`During cooking, kitchen NO₂ can exceed the 1-hour health benchmark of 100 ppb (peak ≈ ${fmt(kitchenWorstHr)} ppb).`)
     }
     return out
   })
@@ -142,6 +188,27 @@
       <p class="sub">See how cooking, ventilation, and your home shape the nitrogen dioxide you breathe — using the multizone CONTAM model behind Kashtan et al. (<a href="https://www.science.org/doi/10.1126/sciadv.adm8680" target="_blank" rel="noopener">Sci. Adv. 2024</a>, <a href="https://doi.org/10.1093/pnasnexus/pgaf341" target="_blank" rel="noopener">PNAS Nexus 2025</a>).</p>
     </div>
   </header>
+
+  <div class="addrbar card">
+    <form class="addr-form" onsubmit={(e) => { e.preventDefault(); applyLocation() }}>
+      <span class="addr-icon" aria-hidden="true">📍</span>
+      <input class="addr-input" type="text" autocomplete="off"
+             placeholder="Enter your address or ZIP code to personalize…"
+             bind:value={addrQuery} />
+      <button class="addr-btn" type="submit" disabled={geoLoading}>
+        {geoLoading ? 'Looking…' : 'Personalize'}
+      </button>
+    </form>
+    {#if location}
+      <div class="addr-result">
+        <span>📍 <strong>{location.city}, {location.state}</strong> · outdoor NO₂ {fmt(location.o)} ppb ·
+        showing a {archetypes[location.arch]?.type_name?.toLowerCase()} typical of this ZIP (adjust anything below)</span>
+        <button class="addr-clear" type="button" onclick={clearLocation}>clear</button>
+      </div>
+    {:else if geoError}
+      <div class="addr-error">{geoError}</div>
+    {/if}
+  </div>
 
   <main class="grid">
     <!-- ===================== CONTROLS ===================== -->
@@ -168,7 +235,7 @@
       <div class="field">
         <div class="seg-head">
           <span class="seg-label">Outdoor NO₂ near you</span>
-          <span class="seg-hint">{fmt(outdoor)} ppb · set automatically by address soon</span>
+          <span class="seg-hint">{fmt(outdoor)} ppb{location ? ' · from your ZIP (adjustable)' : ' · enter an address above to set this'}</span>
         </div>
         <input type="range" min="0" max="35" step="0.5" bind:value={outdoor} />
       </div>
@@ -177,8 +244,12 @@
         {advanced ? '▾' : '▸'} Weather
       </button>
       {#if advanced}
-        <Segmented label="Outdoor temperature" options={TEMP_OPTIONS} bind:value={temp} />
-        <p class="note">Wind is averaged over a national distribution. Colder weather and wind increase air exchange, which lowers indoor buildup.</p>
+        {#if location}
+          <p class="note">Using <strong>{location.city}, {location.state}</strong>'s seasonal climate and typical wind. Clear the address above to set weather manually.</p>
+        {:else}
+          <Segmented label="Outdoor temperature" options={TEMP_OPTIONS} bind:value={temp} />
+          <p class="note">Wind is averaged over a national distribution. Colder weather and wind increase air exchange, which lowers indoor buildup.</p>
+        {/if}
       {/if}
 
       <button class="adv-toggle" onclick={() => (showFineTune = !showFineTune)}>
@@ -220,12 +291,19 @@
         </div>
         <div class="card hero">
           <div class="hlabel">Worst 1-hour during cooking</div>
-          <div class="hvalue tnum" class:over={worstHr > BENCHMARKS.epa1hr}>
-            {fmt(worstHr)}<span class="unit">ppb</span>
+          <div class="dual">
+            <div class="dual-col">
+              <div class="dual-v tnum" class:over={kitchenWorstHr > BENCHMARKS.epa1hr}>{fmt(kitchenWorstHr)}<span class="unit">ppb</span></div>
+              <div class="dual-l">in the kitchen</div>
+            </div>
+            <div class="dual-col">
+              <div class="dual-v tnum" class:over={personalWorstHr > BENCHMARKS.epa1hr}>{fmt(personalWorstHr)}<span class="unit">ppb</span></div>
+              <div class="dual-l">what you breathe</div>
+            </div>
           </div>
           <div class="hsub">
-            {#if worstHr > BENCHMARKS.epa1hr}
-              <span class="pill bad">over EPA/WHO 1-hr (100)</span>
+            {#if kitchenWorstHr > BENCHMARKS.epa1hr}
+              <span class="pill bad">kitchen over EPA/WHO 1-hr (100)</span>
             {:else}
               <span class="pill good">under EPA/WHO 1-hr (100)</span>
             {/if}
@@ -272,7 +350,8 @@
 
   <footer class="foot">
     Estimates use exact CONTAM model results for the chosen scenario; the 24-hour curve is an
-    anchored physical illustration. Built on Kashtan et al. 2024/2025. ·
+    anchored physical illustration. Built on Kashtan et al. 2024/2025. Address lookup ©
+    OpenStreetMap contributors. ·
     <span class="muted">Drafted by Claude with prompts engineered by Yannai Kashtan</span>
   </footer>
 </div>
@@ -283,6 +362,27 @@
   .head-inner { max-width: 760px; }
   h1 { font-size: 27px; }
   .sub { color: var(--ink-2); margin-top: 8px; font-size: 14.5px; }
+
+  .addrbar { padding: 14px 16px; margin-bottom: 18px; }
+  .addr-form { display: flex; align-items: center; gap: 10px; }
+  .addr-icon { font-size: 18px; }
+  .addr-input {
+    flex: 1; font-family: inherit; font-size: 15px; color: var(--ink);
+    border: 1px solid var(--line-2); border-radius: 10px; padding: 11px 13px; min-width: 0;
+  }
+  .addr-input:focus { outline: 2px solid var(--accent-soft); border-color: var(--accent); }
+  .addr-btn {
+    background: var(--accent); color: #fff; border: none; border-radius: 10px;
+    padding: 11px 18px; font-size: 14px; font-weight: 600; cursor: pointer; white-space: nowrap;
+  }
+  .addr-btn:hover { filter: brightness(1.05); }
+  .addr-btn:disabled { opacity: .6; cursor: default; }
+  .addr-result {
+    margin-top: 10px; font-size: 13px; color: var(--ink-2);
+    display: flex; align-items: center; gap: 10px; flex-wrap: wrap;
+  }
+  .addr-clear { background: none; border: none; color: var(--accent); cursor: pointer; font-size: 13px; text-decoration: underline; padding: 0; }
+  .addr-error { margin-top: 10px; font-size: 13px; color: var(--bad); }
 
   .grid { display: grid; grid-template-columns: 366px 1fr; gap: 18px; align-items: start; }
   @media (max-width: 880px) { .grid { grid-template-columns: 1fr; } }
@@ -320,6 +420,13 @@
   .pill { font-size: 12px; font-weight: 650; padding: 3px 9px; border-radius: 999px; }
   .pill.bad { background: #fdecea; color: var(--bad); }
   .pill.good { background: #e9f6ee; color: var(--good); }
+
+  .dual { display: flex; gap: 18px; margin-top: 6px; }
+  .dual-col { flex: 1; }
+  .dual-v { font-size: 30px; font-weight: 720; line-height: 1.05; color: var(--good); }
+  .dual-v.over { color: var(--bad); }
+  .dual-l { font-size: 11.5px; color: var(--muted); margin-top: 2px; }
+  .dual .unit { font-size: 13px; font-weight: 600; color: var(--muted); margin-left: 4px; }
 
   .block { padding: 18px 20px; }
   .block-title { font-size: 13.5px; font-weight: 650; margin-bottom: 16px; color: var(--ink); }

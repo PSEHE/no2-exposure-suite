@@ -37,10 +37,12 @@ Living document. Checkboxes track progress; edit freely.
 - [x] House cross-section concentration visual (room-by-room color gradient)
 - [x] Continuous fine-tune knobs (cooking amount, kitchen size, ventilation) — physical scaling, =1 at CONTAM defaults
 - [x] "What would lower it" before-after comparison (electric / hood / window)
-### 1c. Address Tier 1
-- [ ] Address input → US Census geocoder → ZIP
-- [ ] Lazy-load ZIP data → outdoor NO₂ + climate + wind + smart housing defaults
-- [ ] Graceful fallback to manual mode
+### 1c. Address Tier 1  ✅
+- [x] Address input → ZIP (Nominatim/OSM geocode; Census was CORS-blocked) + 5-digit ZIP fast-path (no network)
+- [x] ZIP data (bundled) → outdoor NO₂ + climate (winter/summer weighting) + ZIP wind dist + default archetype
+- [x] On lookup: auto-set outdoor NO₂ + representative home; everything still adjustable
+- [x] Dual worst-hour readout (kitchen air vs personal); graceful errors + clear/manual fallback
+- Note: single-file build now 6.6 MB / 1.2 MB gz (ZIP table inlined) — trim in 1d
 ### 1d. Polish
 - [ ] Plain-language interpretation + guidance copy
 - [ ] Mobile, accessibility, performance (payload optimization)
