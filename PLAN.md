@@ -43,7 +43,11 @@ Living document. Checkboxes track progress; edit freely.
 - [x] On lookup: auto-set outdoor NO₂ + representative home; everything still adjustable
 - [x] Dual worst-hour readout (kitchen air vs personal); graceful errors + clear/manual fallback
 - Note: single-file build now 6.6 MB / 1.2 MB gz (ZIP table inlined) — trim in 1d
-### 1d. Polish  ⏳ (deploy pending confirmation)
+### Post-launch fix (outdoor component)  ✅
+- [x] Outdoor exposure: full outdoor while outdoors + ventilation-consistent penetration indoors;
+      window opening now lowers exposure under clean outdoor; electric comparison consistent. Live.
+
+### 1d. Polish  ✅ (deployed)
 - [x] Plain-language interpretation + guidance copy
 - [x] Mobile, accessibility (contrast, focus-visible, reduced-motion, aria), performance
 - [x] Payload optimization (zip_data 4.8→3.2 MB; single-file build 1.2→0.89 MB gz)
@@ -59,8 +63,13 @@ Living document. Checkboxes track progress; edit freely.
 - [x] `.prj` parser (`core/prj.py`): zones, flow elements + paths, source/sinks,
       species, kinetic-reaction decay, wind-pressure profiles, symbolic macros.
       Verified on all 24 houses (decay −2.42e-4/s, CONTA ambient 100 ppb, fan 1000 m³/h).
-- [ ] Airflow network solver (Newton-Raphson on zone pressures; stack + wind + fan)
-- [ ] Contaminant transport ODE integrator (with NO₂ decay)
+- [x] Airflow network solver (`core/airflow.py`): Newton-Raphson on zone pressures,
+      power-law leak/orifice/door elements, stack effect + wind-pressure profiles.
+      Verified: converges 7→170 zones (<100 ms), ACH 0–6/h, correct response to
+      temp/wind/window; varies sensibly by house (MH leaky, APT sealed).
+- [ ] Calibrate category→physical mapping (COLD/STILL/window levels → temp °C / wind m/s /
+      open-fraction; tune wind-pressure modifier) against the library's CONTA-derived air exchange
+- [ ] Contaminant transport ODE integrator (interzone airflows + 1000 m³/h door mixing + NO₂ decay)
 - [ ] Validation harness vs stored 86,400 library + per-scenario time-series
 - [ ] Hit ~10–15% fidelity; report error distribution
 - NOTE: scenario-generation macro VALUES ($(TEMP)/$(WIND)/$(WINDOW)/$(USE)) are
