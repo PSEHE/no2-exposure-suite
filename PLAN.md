@@ -56,11 +56,17 @@ Living document. Checkboxes track progress; edit freely.
 - [ ] (Optional) Address Tier 2: property-data API + serverless proxy
 
 ## Phase 2 — CONTAM-Lite engine + validation
-- [ ] `.prj` parser (zones, flow elements, paths, sources, schedules, ambient)
+- [x] `.prj` parser (`core/prj.py`): zones, flow elements + paths, source/sinks,
+      species, kinetic-reaction decay, wind-pressure profiles, symbolic macros.
+      Verified on all 24 houses (decay −2.42e-4/s, CONTA ambient 100 ppb, fan 1000 m³/h).
 - [ ] Airflow network solver (Newton-Raphson on zone pressures; stack + wind + fan)
 - [ ] Contaminant transport ODE integrator (with NO₂ decay)
 - [ ] Validation harness vs stored 86,400 library + per-scenario time-series
 - [ ] Hit ~10–15% fidelity; report error distribution
+- NOTE: scenario-generation macro VALUES ($(TEMP)/$(WIND)/$(WINDOW)/$(USE)) are
+  NOT in the repo (generated on a Windows machine). Engine will take physical
+  units directly; validation requires calibrating category→physical mapping
+  against the library (per-scenario time-series in Results_NO2/ enable this).
 
 ## Phase 3 — CONTAM-Lite app
 - [ ] Streamlit single-home panel (all physical knobs + per-zone time-series + benchmarks)
