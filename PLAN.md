@@ -31,12 +31,12 @@ Living document. Checkboxes track progress; edit freely.
 - [x] Load embedded scenario library; port lookup + ZIP-weighting + archetype selection to JS
 - [x] Manual home picker (24 archetypes) + behavioral controls (hood, use, window, time-in-kitchen)
 - [x] Hero exposure readouts + benchmark bar (WHO / Canada) + red/green over-states
-### 1b. Graphics + live solver  ⏳ (partly done)
+### 1b. Graphics + live solver  ✅
 - [x] 24-h concentration time-series (kitchen vs bedroom) anchored to exact kitchen-air peak
 - [x] Cooking-period shading + adaptive y-axis + 1-hr benchmark line
-- [ ] House cross-section concentration visual
-- [ ] Expose continuous knobs as controls (emission/# burners/cook minutes, kitchen & home size, air-exchange)
-- [ ] "Switch to electric / turn on the hood" before-after comparison
+- [x] House cross-section concentration visual (room-by-room color gradient)
+- [x] Continuous fine-tune knobs (cooking amount, kitchen size, ventilation) — physical scaling, =1 at CONTAM defaults
+- [x] "What would lower it" before-after comparison (electric / hood / window)
 ### 1c. Address Tier 1
 - [ ] Address input → US Census geocoder → ZIP
 - [ ] Lazy-load ZIP data → outdoor NO₂ + climate + wind + smart housing defaults

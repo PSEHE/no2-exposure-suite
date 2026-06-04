@@ -1,7 +1,7 @@
 <script>
   import archetypes from '@data/archetypes.json'
   import { weightedExposure, HOUSES } from '@lib/engine.js'
-  import { simulateDay } from '@lib/boxmodel.js'
+  import { simulateDay, airExchange } from '@lib/boxmodel.js'
   import {
     HOOD_OPTIONS, USE_OPTIONS, WINDOW_OPTIONS, OCCUPANCY_OPTIONS, TEMP_OPTIONS,
     TYPE_GROUPS, NATIONAL_WIND_WEIGHTS, DEFAULT_OUTDOOR_PPB, BENCHMARKS,
@@ -10,6 +10,7 @@
   import Segmented from './components/Segmented.svelte'
   import BenchmarkBar from './components/BenchmarkBar.svelte'
   import TimeSeries from './components/TimeSeries.svelte'
+  import HouseViz from './components/HouseViz.svelte'
 
   // --- controls (state) ---
   let house = $state('DH-1')
@@ -42,30 +43,76 @@
 
   const winds = Object.entries(NATIONAL_WIND_WEIGHTS)
 
-  // Personal exposure for the chosen time-in-kitchen (what you breathe over a year).
+  // --- fine-tune (continuous) knobs; 1.0 = exact CONTAM scenario ---
+  let cookMult = $state(1) // cooking amount × default
+  let volMult = $state(1) // kitchen size × default
+  let airMult = $state(1) // ventilation × default
+  let showFineTune = $state(false)
+  const DECAY = 0.86
+  // Physically-motivated multiplier on the STOVE component. For a well-mixed
+  // zone the steady-state concentration ∝ emission, ∝ 1/volume, ∝ 1/(air-
+  // exchange + decay). Equals 1 at default knob positions, so we stay exactly
+  // on the CONTAM value and scale physically off-grid.
+  let lambda0 = $derived(airExchange(win, temp, 'BREEZE'))
+  let stoveMult = $derived(
+    cookMult * (1 / volMult) * ((lambda0 + DECAY) / (lambda0 * airMult + DECAY))
+  )
+  let tuned = $derived(cookMult !== 1 || volMult !== 1 || airMult !== 1)
+
+  // Personal exposure (chosen time-in-kitchen) and kitchen-air metrics
+  // (high-kitchen-occupancy scenario, where personal exposure ≈ kitchen air).
   let exp = $derived(
     weightedExposure({ house, hood, use, win, oc, temps: [[temp, 1]], winds, outdoorNO2: outdoor })
   )
-
-  // Kitchen-air metrics (independent of the user's occupancy): use the high-
-  // kitchen-occupancy scenario, where personal exposure tracks kitchen air.
-  // These drive the "during cooking" curve and worst-hour readout.
   let kitchenExp = $derived(
     weightedExposure({ house, hood, use, win, oc: 'ninetyfifth_kitchen', temps: [[temp, 1]], winds, outdoorNO2: outdoor })
   )
 
-  // --- 24-h kitchen time-series, anchored to the exact kitchen-air peak ---
+  // --- headline values (stove component scaled by the fine-tune multiplier) ---
+  let stoveLong = $derived(exp.stoveLong * stoveMult)
+  let annual = $derived(stoveLong + exp.outdoorLong)
+  let worstHr = $derived(kitchenExp.stoveHrMax * stoveMult + kitchenExp.outdoorLong)
+  let whoX = $derived(annual / BENCHMARKS.whoAnnual)
+
+  // --- 24-h kitchen time-series, anchored to the exact (tuned) kitchen peak ---
   let ts = $derived(
     simulateDay({
       use, hood, win, temp, wind: 'BREEZE',
-      kitchenVol: kvol, outdoorNO2: outdoor, peakAnchor: kitchenExp.peakMax,
+      kitchenVol: kvol * volMult, outdoorNO2: outdoor, peakAnchor: kitchenExp.peakMax * stoveMult,
     })
   )
 
-  // --- headline values ---
-  let annual = $derived(exp.totalLong) // personal long-term (chosen occupancy)
-  let worstHr = $derived(kitchenExp.stoveHrMax + kitchenExp.outdoorLong) // kitchen 1-hr during cooking
-  let whoX = $derived(annual / BENCHMARKS.whoAnnual)
+  // --- "what helps" interventions: resulting annual ppb + % reduction ---
+  let whatHelps = $derived.by(() => {
+    const annualOf = (mods) => {
+      const e = weightedExposure({
+        house, hood: mods.hood ?? hood, use: mods.use ?? use, win: mods.win ?? win,
+        oc, temps: [[temp, 1]], winds, outdoorNO2: outdoor,
+      })
+      const sm = mods.use === 'zero' ? 0 : stoveMult
+      return e.stoveLong * sm + e.outdoorLong
+    }
+    const base = annual
+    const candidates = []
+    if (use !== 'zero') {
+      if (hood !== '75CE') candidates.push({ label: 'Use a high-efficiency hood', val: annualOf({ hood: '75CE' }) })
+      if (win !== 'open') candidates.push({ label: 'Keep a window open', val: annualOf({ win: 'open' }) })
+      candidates.push({ label: 'Switch to an electric stove', val: annualOf({ use: 'zero' }) })
+    }
+    return candidates
+      .map((c) => ({ ...c, cut: base > 0 ? (base - c.val) / base : 0 }))
+      .filter((c) => c.cut > 0.005)
+      .sort((a, b) => b.cut - a.cut)
+  })
+
+  function resetFineTune() { cookMult = 1; volMult = 1; airMult = 1 }
+
+  // Peak concentration by room for the house cutaway (kitchen highest).
+  let rooms = $derived.by(() => {
+    const k = Math.max(...ts.kitchen)
+    const b = Math.max(...ts.bedroom)
+    return { kitchen: k, living: b + (k - b) * 0.5, bedroom: b }
+  })
 
   // --- plain-language interpretation ---
   let interp = $derived.by(() => {
@@ -73,8 +120,8 @@
     if (use === 'zero') {
       out.push('With the stove off, your indoor NO₂ comes only from outdoor air seeping in.')
     } else {
-      const sharePct = annual > 0 ? Math.round((exp.stoveLong / annual) * 100) : 0
-      out.push(`Your gas stove adds about ${fmt(exp.stoveLong)} ppb of long-term NO₂ — roughly ${sharePct}% of the ${fmt(annual)} ppb you breathe at home on a typical day.`)
+      const sharePct = annual > 0 ? Math.round((stoveLong / annual) * 100) : 0
+      out.push(`Your gas stove adds about ${fmt(stoveLong)} ppb of long-term NO₂ — roughly ${sharePct}% of the ${fmt(annual)} ppb you breathe at home on a typical day.`)
     }
     if (annual > BENCHMARKS.whoAnnual) {
       out.push(`That exceeds the WHO annual guideline (${fmt(BENCHMARKS.whoAnnual)} ppb) by ${whoX.toFixed(1)}×.`)
@@ -133,6 +180,26 @@
         <Segmented label="Outdoor temperature" options={TEMP_OPTIONS} bind:value={temp} />
         <p class="note">Wind is averaged over a national distribution. Colder weather and wind increase air exchange, which lowers indoor buildup.</p>
       {/if}
+
+      <button class="adv-toggle" onclick={() => (showFineTune = !showFineTune)}>
+        {showFineTune ? '▾' : '▸'} Fine-tune {#if tuned}<span class="tuned-dot" title="adjusted"></span>{/if}
+      </button>
+      {#if showFineTune}
+        <p class="note">Adjust continuously around the exact CONTAM scenario (physical scaling).</p>
+        <div class="slider">
+          <div class="srow"><span>Cooking amount</span><span class="sval">{cookMult.toFixed(2)}×</span></div>
+          <input type="range" min="0.25" max="3" step="0.05" bind:value={cookMult} />
+        </div>
+        <div class="slider">
+          <div class="srow"><span>Kitchen size</span><span class="sval">{volMult.toFixed(2)}×</span></div>
+          <input type="range" min="0.5" max="2.5" step="0.05" bind:value={volMult} />
+        </div>
+        <div class="slider">
+          <div class="srow"><span>Ventilation</span><span class="sval">{airMult.toFixed(2)}×</span></div>
+          <input type="range" min="0.5" max="3" step="0.05" bind:value={airMult} />
+        </div>
+        {#if tuned}<button class="reset" onclick={resetFineTune}>Reset to CONTAM defaults</button>{/if}
+      {/if}
     </section>
 
     <!-- ===================== RESULTS ===================== -->
@@ -168,12 +235,33 @@
 
       <div class="card block">
         <div class="block-title">Long-term exposure vs. health guidelines</div>
-        <BenchmarkBar stove={exp.stoveLong} outdoor={exp.outdoorLong} />
+        <BenchmarkBar stove={stoveLong} outdoor={exp.outdoorLong} />
       </div>
+
+      {#if whatHelps.length}
+        <div class="card block">
+          <div class="block-title">What would lower it</div>
+          <div class="helps">
+            {#each whatHelps as h}
+              <div class="help-row">
+                <span class="help-label">{h.label}</span>
+                <span class="help-bar"><span class="help-fill" style="width:{Math.round((1 - h.cut) * 100)}%"></span></span>
+                <span class="help-val tnum">{fmt(h.val)} ppb</span>
+                <span class="help-cut">−{Math.round(h.cut * 100)}%</span>
+              </div>
+            {/each}
+          </div>
+        </div>
+      {/if}
 
       <div class="card block">
         <div class="block-title">A day of kitchen NO₂</div>
         <TimeSeries data={ts} />
+      </div>
+
+      <div class="card block">
+        <div class="block-title">How NO₂ spreads through the home</div>
+        <HouseViz kitchen={rooms.kitchen} living={rooms.living} bedroom={rooms.bedroom} />
       </div>
 
       <div class="card block interp">
@@ -212,6 +300,13 @@
     font-size: 13px; font-weight: 600; padding: 4px 0; margin-top: 2px;
   }
   .note { font-size: 12px; color: var(--muted); margin-top: 4px; }
+  .tuned-dot { display: inline-block; width: 7px; height: 7px; border-radius: 50%; background: var(--accent); margin-left: 2px; vertical-align: middle; }
+  .slider { margin: 10px 0; }
+  .srow { display: flex; justify-content: space-between; font-size: 12.5px; color: var(--ink-2); margin-bottom: 5px; }
+  .sval { font-variant-numeric: tabular-nums; color: var(--accent); font-weight: 600; }
+  .reset { background: none; border: 1px solid var(--line-2); border-radius: 8px; color: var(--ink-2);
+    cursor: pointer; font-size: 12px; padding: 6px 10px; margin-top: 8px; }
+  .reset:hover { border-color: var(--accent); color: var(--accent); }
 
   .results { display: flex; flex-direction: column; gap: 18px; }
   .heroes { display: grid; grid-template-columns: 1fr 1fr; gap: 18px; }
@@ -230,6 +325,18 @@
   .block-title { font-size: 13.5px; font-weight: 650; margin-bottom: 16px; color: var(--ink); }
   .interp { display: flex; flex-direction: column; gap: 8px; }
   .interp p { font-size: 14px; color: var(--ink-2); }
+
+  .helps { display: flex; flex-direction: column; gap: 12px; }
+  .help-row { display: grid; grid-template-columns: 1fr 90px auto auto; align-items: center; gap: 12px; font-size: 13.5px; }
+  .help-label { color: var(--ink); }
+  .help-bar { height: 8px; background: var(--surface-2); border-radius: 5px; overflow: hidden; border: 1px solid var(--line); }
+  .help-fill { display: block; height: 100%; background: var(--good); transition: width .35s cubic-bezier(.4,0,.2,1); }
+  .help-val { color: var(--ink-2); font-size: 12.5px; min-width: 56px; text-align: right; }
+  .help-cut { color: var(--good); font-weight: 650; font-size: 13px; min-width: 44px; text-align: right; }
+  @media (max-width: 520px) {
+    .help-row { grid-template-columns: 1fr auto auto; }
+    .help-bar { display: none; }
+  }
 
   .foot { margin-top: 26px; font-size: 11.5px; color: var(--muted); text-align: center; line-height: 1.6; }
 </style>
