@@ -65,10 +65,21 @@ BURNER_ON_NO2_MG_H = 48.0
 DAILY_NO2_MG_PERCENTILES = {"5th": 0.64, "50th": 31.0, "95th": 199.0}
 
 # --- Epidemiology (population panel, CONTAM-Lite) --------------------------
-# Pediatric asthma incidence relative risk per 15-ppb increase in long-term
-# indoor NO2 (Lin et al. 2013, used in [SciAdv]).
-ASTHMA_RR_PER_15PPB = 1.09
-ASTHMA_RR_PER_15PPB_CI = (0.91, 1.31)
+# Childhood asthma / wheeze effect estimates ALL taken from the indoor-NO2 /
+# gas-cooking meta-analysis (per user direction, in place of Puzzolo et al.):
+#   Lin W., Brunekreef B., Gehring U. (2013). Meta-analysis of the effects of
+#   indoor nitrogen dioxide and gas cooking on asthma and wheeze in children.
+#   Int. J. Epidemiol. 42(6), 1724-1737.  (41 studies, random-effects)
+# Childhood asthma vs. presence/absence of gas cooking:
+ASTHMA_GAS_COOKING_OR = 1.32
+ASTHMA_GAS_COOKING_OR_CI = (1.18, 1.48)
+# Childhood asthma per 15-ppb increase in indoor NO2 (CI crosses 1; not sig.):
+ASTHMA_NO2_OR_PER_15PPB = 1.09
+ASTHMA_NO2_OR_PER_15PPB_CI = (0.91, 1.31)
+# Current wheeze vs. indoor NO2 (random-effects summary OR):
+WHEEZE_NO2_OR = 1.15
+WHEEZE_NO2_OR_CI = (1.06, 1.25)
+
 # All-cause adult mortality RR per 10 ug/m^3 long-term NO2 (Atkinson et al.) [SciAdv].
 MORTALITY_RR_PER_10UGM3 = 1.02
 MORTALITY_RR_PER_10UGM3_CI = (1.01, 1.03)
