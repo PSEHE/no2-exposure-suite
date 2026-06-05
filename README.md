@@ -46,6 +46,27 @@ Pure-Python package used by both products and by the data-export step:
 
 Run `python -m core.export_web_data` to regenerate `web_data/`.
 
+## Running the apps
+
+**Explorer** (public widget): open [the live site](https://psehe.github.io/no2-exposure-suite/),
+or `cd explorer && npm install && npm run dev`. Rebuild the single file with
+`npm run build --prefix explorer && cp explorer/dist/index.html docs/`.
+
+**CONTAM-Lite** (research app):
+```
+pip install -r requirements.txt
+streamlit run contam-lite/app.py
+```
+It runs from data vendored in the repo (`floorplans/`, `web_data/`), so it needs no
+external files. Two panels: a single-home physics engine (pick an archetype or upload your
+own `.prj`) and a population/health panel.
+
+### Deploy CONTAM-Lite to Streamlit Community Cloud
+1. Go to https://share.streamlit.io and sign in with GitHub.
+2. **Create app → Deploy from GitHub**: repository `PSEHE/no2-exposure-suite`, branch `main`,
+   main file `contam-lite/app.py`.
+3. Deploy. (Dependencies install from the root `requirements.txt`.)
+
 ## Status
 
 See [`PLAN.md`](PLAN.md) for the build plan and current progress.
