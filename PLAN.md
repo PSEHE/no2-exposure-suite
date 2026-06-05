@@ -96,9 +96,13 @@ Living document. Checkboxes track progress; edit freely.
       deviations from CONTAM. The engine is physically faithful (dynamics, magnitudes, intervention
       responses all correct); exact-library match is house-dependent. Options to go further:
       per-archetype correction factor, or recover the original macros. (Domain-expert call.)
-- [ ] Population panel (population sliders → reweight → exposure distribution)
-- [ ] Health outcomes (asthma PAF, mortality, costs) + optional maps
-- [ ] (Optional) custom floorplan support
+- [x] Population panel (`core/population.py` + app): population sliders (gas/propane prevalence,
+      hood adoption, cooking intensity, home size, climate) → reweight the exact library →
+      population-mean stove NO₂. Verified baseline ≈ 2.8 ppb (papers ~2.4).
+- [x] Health outcomes: pediatric asthma (Lin gas-cooking OR 1.32), adult mortality (Atkinson
+      RR 1.02/10µg/m³), societal cost (VSL + asthma). Anchored to the papers' national estimates;
+      default view reproduces ≈50k asthma / ≈19k deaths / ≈$250B at 38% prevalence.
+- [ ] (Optional) custom floorplan support; deploy CONTAM-Lite (Streamlit Cloud); maps
 
 ---
 *Drafted by Claude with prompts engineered by Yannai Kashtan*
