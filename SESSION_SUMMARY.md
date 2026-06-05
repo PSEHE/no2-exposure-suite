@@ -1,7 +1,10 @@
 # Session Summary & Handoff — NO₂ Exposure Suite
 
 *Updated 2026-06-04. Written so a fresh session can take over with no prior context.*
-*Next task is at the bottom: **incorporate Persily's full floorplan set**.*
+*Update 2026-06-05: Persily full-suite integration done — see `PLAN.md` Phase 4 (4a–4d-apt
+complete: transformer, 227-home library, floor-area selection/interpolation, scheduled mechanical
+ventilation, and full-building apartment stack with a "which floor?" selector). Remaining: 4e
+Explorer floor-area selection, queued UI changes, and a reduced-order model for tall high-rises.*
 
 ---
 

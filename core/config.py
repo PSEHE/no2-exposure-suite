@@ -39,6 +39,12 @@ VENDORED_FLOORPLANS = REPO_ROOT / "floorplans"
 HOUSE_WEIGHTS_JSON = WEB_DATA / "house_weights.json"
 SCENARIO_LIBRARY_JSON = WEB_DATA / "scenario_library.json"
 
+# --- Persily home library (CONTAM-Lite single-home panel) ---
+# 209 raw CS-11 (pre-2000) + 18 TN 2329 (2000-and-later) NIST dwellings,
+# transformed at load. Separate from the 24-house scenario library above.
+PERSILY_DIR = VENDORED_FLOORPLANS / "persily"
+PERSILY_MANIFEST = WEB_DATA / "persily_manifest.json"
+
 
 def prj_path(house):
     """Path to a floorplan's .prj — the original if present, else the vendored copy."""

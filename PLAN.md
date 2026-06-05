@@ -111,4 +111,78 @@ Living document. Checkboxes track progress; edit freely.
 - [ ] (Optional) ZIP/county maps; Explorer address Tier-2; per-archetype fidelity tuning
 
 ---
+
+## Phase 4 — Persily full-suite homes + floor-area selection/interpolation
+Goal: the user sets home parameters incl. a **total floor area** and the tool selects/interpolates
+the right floorplan. Library = full NIST Persily set: **209 CS-11** (pre-2000) + **18 TN 2329**
+(2000-and-later, new construction). The 18 are a vintage *supplement*, not a replacement.
+Decisions: pool both; vintage axis = pre-2000 / 2000+; metadata from TN 2329 App B (optional);
+**no** leakage re-derivation (keep each home's as-shipped envelope; preserves Sci-Adv calibration).
+
+### 4a. Transformer + validation  ✅
+- [x] `core/transform.py: apply_modifications(model)` — raw NIST → Sci-Adv form in memory:
+      NO₂ decay −2.416e-4/s; bidirectional 1000 m³/h mixing fan-pairs on interior doorways +
+      stairwells; NFRC `std_win_open` windows on bedroom/living/dining/kitchen exterior walls;
+      drop zero-volume AHS phantom zones. Idempotent (no-op on the modified 24). Kitchen source
+      injected at simulate time via `kitchen_zone` (studios fall back to the living zone).
+- [x] `prj.py`: parse `levels` + `model.floor_area_m2()` (conditioned area; matches RECS/AHS sqft).
+- [x] **Golden validation**: transform(raw CS-11 X) reproduces modified `floorplans/X` kitchen
+      peak to ~1% on 13/15 single-family (AH-21, DH-7 are ground-truth artifacts with 0 fan paths;
+      APTs deferred). ACH median ratio 1.02. All 208 non-giant homes simulate; 0 failures.
+
+### 4b. Vendored library + manifest  ✅
+- [x] Vendor 227 raw `.prj` under `floorplans/persily/{cs11/<AH,DH,MH,APTS>, tn2329_2000plus}` (17 MB).
+- [x] `core/persily.py` loader + `web_data/persily_manifest.json` (type, vintage, floor area,
+      stories, zones, single-dwelling vs building). **152 single dwellings** (AH 59 / DH 88 / MH 5),
+      928–3896 ft², all simulatable; **75 APT buildings** → Phase 4d.
+
+### 4c. CONTAM-Lite "describe your home" panel  ✅
+- [x] New "Choose your home by" modes: **Describe your home** (type + stories + floor-area entry →
+      bracket the two nearest homes by area within type, run the live engine on both, **interpolate
+      the outputs**; shows the two source homes + weight), **Browse homes** (152-home picker), and
+      **Upload a .prj** (kept). Vintage filter auto-shows only when >1 vintage is live.
+- [x] Verified live (Streamlit): e.g. Detached 1500 ft² → interpolates DH-9 (1152) + DH-63 (1728),
+      kitchen peak 257 ppb / ACH 0.37; all controls render; results bounded.
+- [x] **Fixed a runaway (was a detection bug, not physics)**: a 159k-ppb peak traced to the stove
+      being injected into a 0.11 m³ phantom AHS node `exh-Kitchen(Ret)` — because the real kitchen
+      was misspelled `kithen` (missed) and the exhaust node *contained* "kitchen" (matched). Fixed
+      `kitchen_zone_id` (require a living zone; tolerate the `kithen` typo) + `_drop_phantom_zones`
+      (drop AHS supply/return/exhaust nodes by name). Windows + interzone mixing were always added
+      correctly (12–17 windows / 16–20 fan-paths per 2024 home; ACH 0.01→8–20 as windows open).
+- [x] Re-enabled the 12 single-family 2000+ homes: **152 simulatable single dwellings**, max baseline
+      kitchen peak 332 ppb (no runaways), vintage axis live in the UI. Golden validation unchanged.
+- [~] Residual: new-construction homes are tight (closed-window ACH ~0.01) and lack modeled mechanical
+      ventilation, so their *closed-window long-term* NO₂ is conservative (UI note added). **4d** makes
+      it realistic. Peaks are physical and they ventilate normally when windows open.
+
+### 4d. Mechanical ventilation (AHS), scheduled  ✅
+- [x] `prj.py` parses `simple AHS` (zr/zs nodes) + each path's `flag`/`a#`/`Fahs` airflow.
+- [x] `transform._mechanical_ventilation`: per-room net exhaust = return − supply `Fahs` (per AHS);
+      recirculating systems (central) net ~0 (mixing, ignored); exhaust-only (kitchen/bath fans)
+      net a real extract. Computed on RAW homes only — the modified 24 are left AHS-free (preserves
+      their calibration). CS-11 = 0 (balanced recirc); the 12 new-construction homes get ~340 m³/h.
+- [x] `airflow.solve_airflow`: net exhaust added as a constant mass sink in the Newton solve →
+      building depressurizes → makeup infiltration rises → realistic ACH. `transport`: exhaust pulls
+      NO₂ out; makeup is outdoor air.
+- [x] **Scheduled** (not continuous): `transport.simulate` is regime-aware — solves the airflow once
+      per fan state and integrates piecewise. Kitchen fan runs while cooking, bath fans during showers
+      (`DEFAULT_SHOWER`). Empty-`mech_extract` homes (CS-11 + the 24) collapse to one regime →
+      unchanged. Result: new-construction day-avg ACH 0.01–1.5, kitchen peaks 117–226, day-avg 6.7–14.6
+      (tight, ventilation spikes during cooking/showers). **Golden validation unchanged.** Verified in UI.
+
+### 4d-apt. Apartments — full-building stack effect  ✅
+- [x] `core/apartments.py`: full-building multizone solve (stack effect emerges from zone heights +
+      the stairwell — no special-casing). Identifies floors, units (by trailing tag, excluding shared
+      circulation zones), and the occupant's unit/kitchen.
+- [x] CONTAM-Lite "Apartment building" mode: building selector + **"which floor do you live on?"** +
+      unit selector → full-building sim → occupant's unit reported (by zone id, handles repeated names).
+      Stack varies exposure by floor (e.g. APT-69 floor 1 day-avg 20.7 vs floor 6 19.0). Verified in UI.
+- [x] Covers the **49 tractable buildings** (≤200 zones, ≥2 floors). The 20 tall high-rises
+      (11–21 storeys, >200 zones) are deferred to a reduced-order stack column.
+
+### 4e. Explorer floor-area selection  ⬜
+- [ ] Floor area + type/stories → select/interpolate among the validated 24 (lightweight, no live
+      physics). Open question: stay on 24 vs. offline-precompute a CS-11 library.
+
+---
 *Drafted by Claude with prompts engineered by Yannai Kashtan*

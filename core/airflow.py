@@ -54,7 +54,8 @@ def _cp(profile, angle_deg):
 
 
 def solve_airflow(model, T_out_C, wind_ms=0.0, wind_dir=0.0,
-                  window_open=0.0, T_in_C=23.0, max_iter=100, tol=1e-7):
+                  window_open=0.0, T_in_C=23.0, max_iter=100, tol=1e-7,
+                  mech_extract=None):
     """Solve the airflow network for one set of ambient conditions.
 
     model:        parsed PrjModel
@@ -69,6 +70,9 @@ def solve_airflow(model, T_out_C, wind_ms=0.0, wind_dir=0.0,
     zone_ids = sorted(model.zones)
     idx = {z: i for i, z in enumerate(zone_ids)}
     nz = len(zone_ids)
+    # Mechanical exhaust (zone -> kg/s). Callers can override (e.g. to toggle a
+    # scheduled fan on/off); otherwise use the model's full extract.
+    mech = mech_extract if mech_extract is not None else (getattr(model, "mech_extract", {}) or {})
     T_in = T_in_C + 273.15
     T_out = T_out_C + 273.15
     rho_in = air_density(T_in)
@@ -120,6 +124,11 @@ def solve_airflow(model, T_out_C, wind_ms=0.0, wind_dir=0.0,
                 ib = idx[b]; F[ib] += w; J[ib, ib] -= dwdP
                 if a != -1:
                     J[ib, idx[a]] += dwdP
+        # Mechanical exhaust (kg/s) to outdoor: a constant sink that depressurizes
+        # the zone, so the solver draws makeup air in through the envelope.
+        for z_id, q in mech.items():
+            if z_id in idx:
+                F[idx[z_id]] -= q
         # Newton step: J dP = -F
         try:
             dPv = np.linalg.solve(J, -F)
@@ -189,5 +198,6 @@ def solve_airflow(model, T_out_C, wind_ms=0.0, wind_dir=0.0,
         "rho_in": rho_in, "rho_out": rho_out,
         "path_flows": path_flows,   # [(a, b, w_mass kg/s)] power-law paths
         "fans": fans,               # [(a, b, Q_vol m3/s)] constant-flow mixing
+        "mech_exhaust": [(z, mech[z]) for z in mech if z in idx],  # [(zone, kg/s)]
         "zone_ids": zone_ids,
     }
