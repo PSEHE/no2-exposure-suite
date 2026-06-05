@@ -69,8 +69,12 @@ Living document. Checkboxes track progress; edit freely.
       temp/wind/window; varies sensibly by house (MH leaky, APT sealed).
 - [ ] Calibrate category→physical mapping (COLD/STILL/window levels → temp °C / wind m/s /
       open-fraction; tune wind-pressure modifier) against the library's CONTA-derived air exchange
-- [ ] Contaminant transport ODE integrator (interzone airflows + 1000 m³/h door mixing + NO₂ decay)
-- [ ] Validation harness vs stored 86,400 library + per-scenario time-series
+- [x] Contaminant transport ODE integrator (`core/transport.py`): volumetric flow matrix from
+      the airflow solve + 1000 m³/h interzone fan mixing + cooking sources + first-order decay,
+      integrated exactly via matrix exponential. Verified: kitchen NO₂ buildup→decay with peaks
+      ~150–400 ppb (matches the papers), 75% hood → 75% peak cut, ventilation lowers exposure,
+      sealed apartments worse than leaky homes.
+- [ ] Calibrate category→physical mapping + validation harness vs stored 86,400 library
 - [ ] Hit ~10–15% fidelity; report error distribution
 - NOTE: scenario-generation macro VALUES ($(TEMP)/$(WIND)/$(WINDOW)/$(USE)) are
   NOT in the repo (generated on a Windows machine). Engine will take physical

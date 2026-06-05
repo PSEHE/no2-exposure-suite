@@ -128,14 +128,25 @@ def solve_airflow(model, T_out_C, wind_ms=0.0, wind_dir=0.0,
 
     # Recover flows and per-zone outdoor air exchange.
     inflow_from_out = {z: 0.0 for z in zone_ids}     # kg/s of outdoor air into each zone
+    path_flows = []   # (a, b, w_mass) directed mass flow a->b (kg/s) for each power-law path
     for (a, b, C, n, z, wind_P) in paths:
         Pa = node_P_at(a, z) + (wind_P if a == -1 else 0.0)
         Pb = node_P_at(b, z) + (wind_P if b == -1 else 0.0)
         w, _ = _powerlaw(C, n, Pa - Pb)
+        path_flows.append((a, b, w))
         if a == -1 and b != -1 and w > 0:
             inflow_from_out[b] += w
         elif b == -1 and a != -1 and w < 0:
             inflow_from_out[a] += -w
+
+    # Constant-volume-flow elements (interzone mixing fans / AHS) — excluded from
+    # the pressure solve (≈zero net mass) but needed for contaminant transport.
+    fans = []  # (a, b, Q_vol m3/s) bidirectional volumetric mixing
+    for p in model.paths:
+        el = model.elements.get(p.element)
+        if el is not None and el.type_code in FAN_TYPES:
+            Q = float(el.params[0]) * p.mult
+            fans.append((p.n_from, p.n_to, Q))
 
     ach = {}
     for z in zone_ids:
@@ -152,4 +163,7 @@ def solve_airflow(model, T_out_C, wind_ms=0.0, wind_dir=0.0,
         "ach": ach,
         "whole_home_ach": whole_home_ach,
         "rho_in": rho_in, "rho_out": rho_out,
+        "path_flows": path_flows,   # [(a, b, w_mass kg/s)] power-law paths
+        "fans": fans,               # [(a, b, Q_vol m3/s)] constant-flow mixing
+        "zone_ids": zone_ids,
     }
