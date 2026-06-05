@@ -1,0 +1,6 @@
+# CONTAM-Lite research app
+streamlit>=1.40
+plotly>=5.18
+numpy>=1.26
+scipy>=1.11
+pandas>=2.0

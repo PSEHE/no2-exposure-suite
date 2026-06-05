@@ -82,10 +82,14 @@ Living document. Checkboxes track progress; edit freely.
   against the library (per-scenario time-series in Results_NO2/ enable this).
 
 ## Phase 3 — CONTAM-Lite app
-- [ ] Streamlit single-home panel (all physical knobs + per-zone time-series + benchmarks)
-- [ ] Custom floorplan support
-- [ ] Population panel (population sliders → reweight library → exposure distribution)
+- [x] Streamlit single-home panel (`contam-lite/app.py`): floorplan picker + physical knobs
+      (temp, wind, outdoor NO₂, window, hood, cooking pattern, burner intensity) → live per-zone
+      24-h plot + metrics (ACH, kitchen peak / max-1hr / daily) + by-room table + benchmarks.
+      Verified running (DH-1: dinner peak 156 ppb, max-1hr 105). Run: `streamlit run contam-lite/app.py`.
+- [ ] Calibrate category→physical mapping + validation harness vs the 86,400 library (~10–15%)
+- [ ] Population panel (population sliders → reweight → exposure distribution)
 - [ ] Health outcomes (asthma PAF, mortality, costs) + optional maps
+- [ ] (Optional) custom floorplan support
 
 ---
 *Drafted by Claude with prompts engineered by Yannai Kashtan*

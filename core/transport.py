@@ -46,7 +46,7 @@ def _no2_sources(model):
 
 def simulate(model, *, T_out_C=10.0, wind_ms=2.0, wind_dir=0.0, window_open=0.0,
              hood="NoHood", cooking=None, C_out_ppb=0.0, T_in_C=23.0,
-             hours=24, dt_min=10):
+             emission_scale=1.0, hours=24, dt_min=10):
     """Run a day of NO2 transport. Returns time series + per-zone summary."""
     afr = af.solve_airflow(model, T_out_C=T_out_C, wind_ms=wind_ms, wind_dir=wind_dir,
                            window_open=window_open, T_in_C=T_in_C)
@@ -97,11 +97,11 @@ def simulate(model, *, T_out_C=10.0, wind_ms=2.0, wind_dir=0.0, window_open=0.0,
         if cooktop_on:
             for z, r in cooktop.items():
                 if z in idx:
-                    g[idx[z]] += r * hood_mult
+                    g[idx[z]] += r * hood_mult * emission_scale
         if oven_on:
             for z, r in oven.items():
                 if z in idx:
-                    g[idx[z]] += r * hood_mult
+                    g[idx[z]] += r * hood_mult * emission_scale
         # b_i = [Q_out->i * C_out + (g_i / PPB_TO_KGM3)] / V_i   (ppb/s)
         return (Qout_in * C_out_ppb + g / PPB_TO_KGM3) / V
 
