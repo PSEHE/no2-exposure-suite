@@ -102,7 +102,13 @@ Living document. Checkboxes track progress; edit freely.
 - [x] Health outcomes: pediatric asthma (Lin gas-cooking OR 1.32), adult mortality (Atkinson
       RR 1.02/10µg/m³), societal cost (VSL + asthma). Anchored to the papers' national estimates;
       default view reproduces ≈50k asthma / ≈19k deaths / ≈$250B at 38% prevalence.
-- [ ] (Optional) custom floorplan support; deploy CONTAM-Lite (Streamlit Cloud); maps
+- [x] Custom floorplan support: upload a CONTAM `.prj` in the single-home panel; if it has no
+      NO₂ source, pick a kitchen zone and a standard cooktop+oven is injected.
+- [x] Deploy-ready for Streamlit Cloud: vendored 24 floorplans (`floorplans/`) + `house_weights.json`,
+      library/floorplan loaders fall back to repo data (verified app runs with original data absent),
+      root `requirements.txt` + `.streamlit/config.toml`. Final deploy = one click on share.streamlit.io
+      (select repo + `contam-lite/app.py`) — needs the user's GitHub OAuth.
+- [ ] (Optional) ZIP/county maps; Explorer address Tier-2; per-archetype fidelity tuning
 
 ---
 *Drafted by Claude with prompts engineered by Yannai Kashtan*

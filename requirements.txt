@@ -1,0 +1,7 @@
+# Dependencies for the CONTAM-Lite Streamlit app (contam-lite/app.py).
+# Streamlit Community Cloud installs from this root requirements.txt.
+streamlit>=1.40
+plotly>=5.18
+numpy>=1.26
+scipy>=1.11
+pandas>=2.0

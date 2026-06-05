@@ -1,0 +1,10 @@
+# Streamlit configuration for CONTAM-Lite.
+[theme]
+primaryColor = "#1f6feb"
+base = "light"
+
+[server]
+maxUploadSize = 25   # MB — plenty for a .prj floorplan upload
+
+[browser]
+gatherUsageStats = false

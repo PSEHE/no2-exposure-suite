@@ -33,8 +33,21 @@ BASELINE_DEATHS = 19_000               # adult deaths attributable (upper-ish)
 
 @functools.lru_cache(maxsize=1)
 def house_weights():
+    # Prefer the repo-vendored JSON (works on any host); fall back to the pickle.
+    import json
+    if config.HOUSE_WEIGHTS_JSON.exists():
+        with open(config.HOUSE_WEIGHTS_JSON) as f:
+            return json.load(f)
     with open(config.SCALEUP / "_DICTS" / "house_weights.pkl", "rb") as f:
         return pickle.load(f)
+
+
+@functools.lru_cache(maxsize=1)
+def _archetype_volumes():
+    import json
+    with open(config.WEB_DATA / "archetypes.json") as f:
+        arch = json.load(f)
+    return {h: (a.get("total_volume_m3") or 1.0) for h, a in arch.items()}
 
 
 def _norm(d):
@@ -103,21 +116,13 @@ def use_dist(intensity):
 
 def home_size_weights(shift):
     """shift -1 (smaller homes) .. +1 (larger). Reweights house_weights by total
-    volume (smaller homes -> higher exposure)."""
-    from . import prj
+    home volume (smaller homes -> higher exposure)."""
     hw = dict(house_weights())
     if abs(shift) < 1e-6:
         return hw
-    vols = {}
-    for h in hw:
-        try:
-            m = prj.parse_prj(config.DATABASE_HOUSES / h / f"{h}.prj")
-            vols[h] = sum(z.volume for z in m.zones.values())
-        except Exception:
-            vols[h] = 1.0
     import numpy as np
-    v = np.array([vols[h] for h in hw])
+    vols = _archetype_volumes()
+    v = np.array([vols.get(h, 1.0) for h in hw])
     vnorm = (v - v.mean()) / (v.std() + 1e-9)
     factor = np.exp(shift * vnorm)            # shift>0 favors larger homes
-    out = {h: hw[h] * f for h, f in zip(hw, factor)}
-    return _norm(out)
+    return _norm({h: hw[h] * f for h, f in zip(hw, factor)})

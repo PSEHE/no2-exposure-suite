@@ -171,9 +171,15 @@ def _data_lines(body):
 
 # --- main parse -------------------------------------------------------------
 def parse_prj(path):
-    text = open(path, errors="ignore").read()
+    """Parse a .prj file from disk."""
+    with open(path, errors="ignore") as f:
+        return parse_prj_text(f.read(), label=str(path))
+
+
+def parse_prj_text(text, label="<uploaded>"):
+    """Parse a .prj from its text content (e.g. an uploaded file)."""
     lines = text.splitlines()
-    model = PrjModel(path=str(path), ambient_T=None, ambient_wind=None, ambient_P=101325.0)
+    model = PrjModel(path=label, ambient_T=None, ambient_wind=None, ambient_P=101325.0)
 
     # Ambient: the data line following the "! Ta Pb Ws Wd ..." comment.
     for idx, ln in enumerate(lines):

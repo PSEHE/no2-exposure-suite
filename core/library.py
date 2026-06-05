@@ -46,11 +46,37 @@ OCCUPANCY_LABELS = {
 # --- Loaders (cached) ------------------------------------------------------
 @functools.lru_cache(maxsize=1)
 def load_library():
-    """Return (no2_dict, conta_dict)."""
-    with open(config.SCENARIO_DICT_NO2, "rb") as f:
-        no2 = pickle.load(f)
-    with open(config.SCENARIO_DICT_CONTA, "rb") as f:
-        conta = pickle.load(f)
+    """Return (no2_dict, conta_dict). Uses the original pickles if present,
+    else rebuilds from the repo-vendored web_data/scenario_library.json (so the
+    app works on hosts without the original data, e.g. Streamlit Cloud)."""
+    try:
+        with open(config.SCENARIO_DICT_NO2, "rb") as f:
+            no2 = pickle.load(f)
+        with open(config.SCENARIO_DICT_CONTA, "rb") as f:
+            conta = pickle.load(f)
+        return no2, conta
+    except (FileNotFoundError, OSError):
+        return _load_library_from_json()
+
+
+def _load_library_from_json():
+    import json
+    with open(config.SCENARIO_LIBRARY_JSON) as f:
+        d = json.load(f)
+    s = d["schema"]
+    no2, conta, i = {}, {}, 0
+    for h in s["houses"]:
+        for hd in s["hood"]:
+            for u in s["use"]:
+                for w in s["window"]:
+                    for t in s["temp"]:
+                        for wd in s["wind"]:
+                            for oc in s["oc"]:
+                                k = f"{h}_{hd}_{u}_{w}_{t}_{wd}_{oc}"
+                                no2[k] = {"peak": d["no2"]["peak"][i], "hravg": d["no2"]["hravg"][i],
+                                          "eighthravg": d["no2"]["eighthravg"][i], "dayavg": d["no2"]["dayavg"][i]}
+                                conta[k] = {"hravg": d["conta"]["hravg"][i], "dayavg": d["conta"]["dayavg"][i]}
+                                i += 1
     return no2, conta
 
 

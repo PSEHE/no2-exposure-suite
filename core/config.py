@@ -32,3 +32,15 @@ FLOORPLAN_PDFS = EXPOSURE_CALCULATOR / "static" / "Floorplan_Layouts"
 
 # --- Output: widget-ready JSON ---
 WEB_DATA = REPO_ROOT / "web_data"
+
+# --- Repo-vendored data (used when the original local data is absent, e.g. on
+#     Streamlit Cloud) ---
+VENDORED_FLOORPLANS = REPO_ROOT / "floorplans"
+HOUSE_WEIGHTS_JSON = WEB_DATA / "house_weights.json"
+SCENARIO_LIBRARY_JSON = WEB_DATA / "scenario_library.json"
+
+
+def prj_path(house):
+    """Path to a floorplan's .prj — the original if present, else the vendored copy."""
+    orig = DATABASE_HOUSES / house / f"{house}.prj"
+    return orig if orig.exists() else VENDORED_FLOORPLANS / f"{house}.prj"

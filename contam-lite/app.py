@@ -48,7 +48,20 @@ def load_archetypes():
 
 @st.cache_resource
 def load_model(house):
-    return prj.parse_prj(config.DATABASE_HOUSES / house / f"{house}.prj")
+    return prj.parse_prj(config.prj_path(house))
+
+
+@st.cache_resource
+def parse_uploaded(name, text):
+    return prj.parse_prj_text(text, label=name)
+
+
+def has_no2_source(model):
+    for s in model.sources:
+        el = model.source_elements.get(s.element)
+        if el and el.species == "NO2" and "ov" not in el.name:
+            return True
+    return False
 
 
 def kitchen_zone_name(model):
@@ -86,6 +99,20 @@ if panel == "Single home":
 
     house = st.sidebar.selectbox("Floorplan", house_opts, index=house_opts.index("DH-1"),
                                  format_func=house_label)
+    up = st.sidebar.file_uploader("…or upload a CONTAM .prj", type=["prj"])
+    custom_kitchen = None
+    if up is not None:
+        model = parse_uploaded(up.name, up.getvalue().decode("latin-1", "ignore"))
+        house_title = f"Custom: {up.name} · {len(model.zones)} zones"
+        if not has_no2_source(model):
+            zopts = {f"{z.name} (#{z.id}, {z.volume:.0f} m³)": z.id
+                     for z in sorted(model.zones.values(), key=lambda z: -z.volume)}
+            pick = st.sidebar.selectbox("Kitchen zone (no stove source in file)", list(zopts))
+            custom_kitchen = zopts[pick]
+    else:
+        model = load_model(house)
+        house_title = house_label(house)
+
     st.sidebar.subheader("Environment")
     T_out = st.sidebar.slider("Outdoor temperature (°C)", -15, 38, 5)
     wind = st.sidebar.slider("Wind speed (m/s)", 0.0, 12.0, 3.0, 0.5)
@@ -100,16 +127,15 @@ if panel == "Single home":
     pattern = st.sidebar.selectbox("Meal pattern", list(COOKING_PATTERNS), index=2)
     intensity = st.sidebar.slider("Burner intensity (× one burner)", 0.5, 4.0, 1.0, 0.25)
 
-    model = load_model(house)
     res = transport.simulate(model, T_out_C=T_out, wind_ms=wind, window_open=window_open,
                              hood=hood, cooking=COOKING_PATTERNS[pattern], C_out_ppb=outdoor_no2,
-                             emission_scale=intensity)
+                             emission_scale=intensity, kitchen_zone=custom_kitchen)
     t = res["t"]
-    kname = kitchen_zone_name(model)
+    kname = model.zones[custom_kitchen].name if custom_kitchen is not None else kitchen_zone_name(model)
     kitchen = res["by_zone"].get(kname, np.zeros_like(t))
 
     st.title("Single-home NO₂")
-    st.caption(f"{house_label(house)} · {len(model.zones)} zones · {len(model.paths)} flow paths · "
+    st.caption(f"{house_title} · {len(model.paths)} flow paths · "
                "first-principles airflow + transport (not a lookup).")
     c1, c2, c3, c4 = st.columns(4)
     c1.metric("Air exchange", f"{res['whole_home_ach']:.2f} /h")

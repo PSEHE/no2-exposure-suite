@@ -31,8 +31,20 @@ DEFAULT_COOKING = [
 ]
 
 
-def _no2_sources(model):
-    """Per-zone NO2 source rates (kg/s) split into cooktop and oven."""
+# Standard single-burner / oven NO2 rates (kg/s), from the .prj source elements —
+# used to inject a source into custom floorplans that lack NO2 sources.
+STD_COOKTOP_KG_S = 3.1878e-8
+STD_OVEN_KG_S = 3.66597e-8
+
+
+def _no2_sources(model, kitchen_zone=None):
+    """Per-zone NO2 source rates (kg/s) split into cooktop and oven.
+
+    If kitchen_zone is given (custom floorplan), inject a standard cooktop+oven
+    there. Otherwise read the model's NO2 source elements; if none exist, also
+    fall back to a standard source in kitchen_zone (when provided)."""
+    if kitchen_zone is not None:
+        return {kitchen_zone: STD_COOKTOP_KG_S}, {kitchen_zone: STD_OVEN_KG_S}
     cooktop, oven = {}, {}
     for s in model.sources:
         el = model.source_elements.get(s.element)
@@ -46,7 +58,7 @@ def _no2_sources(model):
 
 def simulate(model, *, T_out_C=10.0, wind_ms=2.0, wind_dir=0.0, window_open=0.0,
              hood="NoHood", cooking=None, C_out_ppb=0.0, T_in_C=23.0,
-             emission_scale=1.0, hours=24, dt_min=10):
+             emission_scale=1.0, kitchen_zone=None, hours=24, dt_min=10):
     """Run a day of NO2 transport. Returns time series + per-zone summary."""
     afr = af.solve_airflow(model, T_out_C=T_out_C, wind_ms=wind_ms, wind_dir=wind_dir,
                            window_open=window_open, T_in_C=T_in_C)
@@ -88,7 +100,7 @@ def simulate(model, *, T_out_C=10.0, wind_ms=2.0, wind_dir=0.0, window_open=0.0,
     A[np.diag_indices(nz)] = -(outflow / V + k)
 
     # --- cooking sources -> per-zone generation (kg/s), by on/off state ---
-    cooktop, oven = _no2_sources(model)
+    cooktop, oven = _no2_sources(model, kitchen_zone=kitchen_zone)
     hood_mult = HOOD_MULT.get(hood, 1.0)
     events = DEFAULT_COOKING if cooking is None else cooking
 
