@@ -22,6 +22,8 @@ R_GAS = 8.31446
 POWERLAW_TYPES = {23, 25, 27}   # plr_leak, plr_orfc, dor_door (net flow)
 FAN_TYPES = {31, 29}            # fan_cvf / constant volume flow
 DOOR_TYPES = {27}               # dor_door — also gets two-way density exchange
+DOOR_CD = 0.35                  # discharge coef for two-way opening flow (calibrated)
+WIND_MOD = 0.3                  # global wind-pressure scale (calibrated)
 
 
 def air_density(T_kelvin, P=P_ATM):
@@ -91,7 +93,7 @@ def solve_airflow(model, T_out_C, wind_ms=0.0, wind_dir=0.0,
         wind_P = 0.0
         if (p.n_from == -1 or p.n_to == -1) and p.wind_profile in model.wind_profiles and wind_ms > 0:
             cp = _cp(model.wind_profiles[p.wind_profile], wind_dir - p.wazm)
-            wind_P = (p.wPmod if p.wPmod else 1.0) * cp * Pdyn
+            wind_P = WIND_MOD * (p.wPmod if p.wPmod else 1.0) * cp * Pdyn
         paths.append((p.n_from, p.n_to, C * mult, n, p.relHt, wind_P))
 
     P = np.zeros(nz)   # zone gauge pressures (Pa), ambient = 0
@@ -154,7 +156,6 @@ def solve_airflow(model, T_out_C, wind_ms=0.0, wind_dir=0.0,
     # window exchanges air bidirectionally driven by the in/out density gradient
     # over its height:  Q ≈ (1/3) Cd W H sqrt(g H |dρ| / ρ).  This is the main
     # ventilation when windows are open. Scaled by the opening fraction.
-    Cd_door = 0.6
     for p in model.paths:
         el = model.elements.get(p.element)
         if el is None or el.type_code not in DOOR_TYPES or window_open <= 0:
@@ -168,7 +169,7 @@ def solve_airflow(model, T_out_C, wind_ms=0.0, wind_dir=0.0,
         drho = abs(rho_a - rho_b)
         if drho < 1e-4 or H <= 0 or W <= 0:
             continue
-        Qexch = (1.0 / 3.0) * Cd_door * W * H * np.sqrt(G * H * drho / (0.5 * (rho_a + rho_b)))
+        Qexch = (1.0 / 3.0) * DOOR_CD * W * H * np.sqrt(G * H * drho / (0.5 * (rho_a + rho_b)))
         fans.append((p.n_from, p.n_to, Qexch * window_open * p.mult))
 
     ach = {}

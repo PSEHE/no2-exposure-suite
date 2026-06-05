@@ -86,13 +86,16 @@ Living document. Checkboxes track progress; edit freely.
       (temp, wind, outdoor NO₂, window, hood, cooking pattern, burner intensity) → live per-zone
       24-h plot + metrics (ACH, kitchen peak / max-1hr / daily) + by-room table + benchmarks.
       Verified running (DH-1: dinner peak 156 ppb, max-1hr 105). Run: `streamlit run contam-lite/app.py`.
-- [x] Validation harness (`core/validate.py`): category→physical mapping + occupancy-weighting
-      port + comparison to the library. Found & fixed a major bug — two-way density-driven flow
-      through open windows (open-window error 24×→2.8×) — and calibrated per-use emission.
-      Median day-avg error now ~25% (from ~400%); ~35–48% on 1-hr. Engine is structurally sound;
-      remaining gap is air-exchange-mapping fine-tuning (temp/wind/window physical values, two-way
-      coefficient), floored by the original generation macros being unavailable. Not yet at the
-      10–15% target — iterative tuning remains.
+- [x] Validation harness (`core/validate.py`) + calibration (`core/calibrate.py`, coordinate
+      descent). Fixed a major bug — two-way density-driven flow through open windows (24×→2.8×) —
+      and calibrated the category→physical mapping + per-use emission.
+      Fidelity (day-avg median): **~17% on the 3 fit houses, but ~40% on held-out houses** with a
+      systematic per-type bias (MH/DH over-predict ~1.4×, AH/APT under-predict ~0.86×). Conclusion:
+      a single global mapping can't reach a uniform 10–15% across all 24 archetypes — the original
+      generation macros aren't in the repo AND the ASHRAE-default leakage model has house-specific
+      deviations from CONTAM. The engine is physically faithful (dynamics, magnitudes, intervention
+      responses all correct); exact-library match is house-dependent. Options to go further:
+      per-archetype correction factor, or recover the original macros. (Domain-expert call.)
 - [ ] Population panel (population sliders → reweight → exposure distribution)
 - [ ] Health outcomes (asthma PAF, mortality, costs) + optional maps
 - [ ] (Optional) custom floorplan support

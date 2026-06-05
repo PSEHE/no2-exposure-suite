@@ -19,10 +19,10 @@ import pandas as pd
 from . import config, prj, transport
 from . import library as lib
 
-# --- category -> physical mapping (initial estimates; calibratable) ---
-TEMP_C = {"COLD": 0.0, "COOL": 10.0, "RT": 20.0, "WARM": 30.0}
-WIND_MS = {"STILL": 0.5, "BREEZE": 3.0, "WINDY": 6.0}
-WINDOW_OPEN = {"closed": 0.0, "moderate": 0.2, "open": 0.7}
+# --- category -> physical mapping (calibrated against the library) ---
+TEMP_C = {"COLD": -5.0, "COOL": 10.0, "RT": 20.0, "WARM": 30.0}
+WIND_MS = {"STILL": 0.0, "BREEZE": 5.0, "WINDY": 5.0}
+WINDOW_OPEN = {"closed": 0.0, "moderate": 0.03, "open": 0.7}
 USE_COOKING = {
     "zero": [],
     "low": [{"start": 7.7, "min": 10, "cooktop": True, "oven": False}],
@@ -36,7 +36,7 @@ USE_COOKING = {
 }
 # Emission scale per use, calibrated so closed-window day-avg matches the library
 # (the cooking schedules above emit more than the library's per-use burner-minutes).
-USE_SCALE = {"zero": 0.0, "low": 0.754, "med": 0.191, "medNoBk": 0.282, "high": 0.54}
+USE_SCALE = {"zero": 0.0, "low": 1.0, "med": 0.267, "medNoBk": 0.313, "high": 0.646}
 
 
 @functools.lru_cache(maxsize=1)
