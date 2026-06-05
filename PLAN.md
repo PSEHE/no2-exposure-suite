@@ -86,7 +86,13 @@ Living document. Checkboxes track progress; edit freely.
       (temp, wind, outdoor NO₂, window, hood, cooking pattern, burner intensity) → live per-zone
       24-h plot + metrics (ACH, kitchen peak / max-1hr / daily) + by-room table + benchmarks.
       Verified running (DH-1: dinner peak 156 ppb, max-1hr 105). Run: `streamlit run contam-lite/app.py`.
-- [ ] Calibrate category→physical mapping + validation harness vs the 86,400 library (~10–15%)
+- [x] Validation harness (`core/validate.py`): category→physical mapping + occupancy-weighting
+      port + comparison to the library. Found & fixed a major bug — two-way density-driven flow
+      through open windows (open-window error 24×→2.8×) — and calibrated per-use emission.
+      Median day-avg error now ~25% (from ~400%); ~35–48% on 1-hr. Engine is structurally sound;
+      remaining gap is air-exchange-mapping fine-tuning (temp/wind/window physical values, two-way
+      coefficient), floored by the original generation macros being unavailable. Not yet at the
+      10–15% target — iterative tuning remains.
 - [ ] Population panel (population sliders → reweight → exposure distribution)
 - [ ] Health outcomes (asthma PAF, mortality, costs) + optional maps
 - [ ] (Optional) custom floorplan support

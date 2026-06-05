@@ -19,8 +19,9 @@ P_ATM = 101325.0
 M_AIR = 0.0289647     # kg/mol
 R_GAS = 8.31446
 
-POWERLAW_TYPES = {23, 25, 27}   # plr_leak, plr_orfc, dor_door
+POWERLAW_TYPES = {23, 25, 27}   # plr_leak, plr_orfc, dor_door (net flow)
 FAN_TYPES = {31, 29}            # fan_cvf / constant volume flow
+DOOR_TYPES = {27}               # dor_door — also gets two-way density exchange
 
 
 def air_density(T_kelvin, P=P_ATM):
@@ -147,6 +148,28 @@ def solve_airflow(model, T_out_C, wind_ms=0.0, wind_dir=0.0,
         if el is not None and el.type_code in FAN_TYPES:
             Q = float(el.params[0]) * p.mult
             fans.append((p.n_from, p.n_to, Q))
+
+    # Two-way density-driven exchange through OPEN large openings (windows/doors).
+    # A one-way power law gives ~zero flow at small net dP, but a real open
+    # window exchanges air bidirectionally driven by the in/out density gradient
+    # over its height:  Q ≈ (1/3) Cd W H sqrt(g H |dρ| / ρ).  This is the main
+    # ventilation when windows are open. Scaled by the opening fraction.
+    Cd_door = 0.6
+    for p in model.paths:
+        el = model.elements.get(p.element)
+        if el is None or el.type_code not in DOOR_TYPES or window_open <= 0:
+            continue
+        try:
+            H = float(el.params[4]); W = float(el.params[5])
+        except (IndexError, ValueError):
+            continue
+        rho_a = rho_out if p.n_from == -1 else rho_in
+        rho_b = rho_out if p.n_to == -1 else rho_in
+        drho = abs(rho_a - rho_b)
+        if drho < 1e-4 or H <= 0 or W <= 0:
+            continue
+        Qexch = (1.0 / 3.0) * Cd_door * W * H * np.sqrt(G * H * drho / (0.5 * (rho_a + rho_b)))
+        fans.append((p.n_from, p.n_to, Qexch * window_open * p.mult))
 
     ach = {}
     for z in zone_ids:
