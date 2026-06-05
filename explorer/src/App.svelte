@@ -1,6 +1,6 @@
 <script>
   import archetypes from '@data/archetypes.json'
-  import { weightedExposure, HOUSES } from '@lib/engine.js'
+  import { weightedExposure, interpExposure, bracketByArea, homesByArea, HOUSES } from '@lib/engine.js'
   import { simulateDay, airExchange } from '@lib/boxmodel.js'
   import {
     HOOD_OPTIONS, USE_OPTIONS, WINDOW_OPTIONS, OCCUPANCY_OPTIONS, TEMP_OPTIONS,
@@ -15,7 +15,10 @@
   import HouseViz from './components/HouseViz.svelte'
 
   // --- controls (state) ---
-  let house = $state('DH-1')
+  // Home is described by type + total floor area; the engine brackets the two
+  // nearest of the 24 by floor area and interpolates their exposure.
+  let homeType = $state('DH')
+  let floorArea = $state(1500)
   let hood = $state('NoHood')
   let use = $state('med')
   let win = $state('moderate')
@@ -23,6 +26,21 @@
   let temp = $state('RT')
   let outdoor = $state(DEFAULT_OUTDOOR_PPB)
   let advanced = $state(false)
+
+  // The two homes bracketing the chosen floor area (within type), the weight
+  // toward the larger, and the nearer home (used for the geometry/cross-section).
+  let bracket = $derived(bracketByArea(homeType, floorArea))
+  let house = $derived(bracket ? (bracket.w < 0.5 ? bracket.below : bracket.above) : HOUSES[0])
+  let areaRange = $derived.by(() => {
+    const p = homesByArea(homeType)
+    return p.length ? [p[0].area, p[p.length - 1].area] : [800, 3000]
+  })
+  // Keep the floor-area input within the available range for the chosen type.
+  $effect(() => {
+    const [lo, hi] = areaRange
+    if (floorArea < lo) floorArea = lo
+    else if (floorArea > hi) floorArea = hi
+  })
 
   // --- location (address / ZIP personalization) ---
   let addrQuery = $state('')
@@ -41,7 +59,11 @@
       location = { zip, label, city: z.c, state: z.s, o: z.o, wt: z.wt, st: z.st, w: z.w, arch: z.arch }
       // Personalize: outdoor NO2 + a representative home for this ZIP.
       outdoor = z.o
-      if (archetypes[z.arch]) house = z.arch
+      const az = archetypes[z.arch]
+      if (az) {
+        homeType = az.type
+        if (az.floor_area_ft2 != null) floorArea = az.floor_area_ft2
+      }
     } catch (e) {
       geoError = e.message || 'Lookup failed.'
       location = null
@@ -50,22 +72,6 @@
     }
   }
   function clearLocation() { location = null; geoError = ''; addrQuery = '' }
-
-  // --- home picker options, grouped by type, with a friendly size label ---
-  function sizeLabel(v) {
-    if (v == null) return ''
-    if (v < 350) return 'compact'
-    if (v < 550) return 'small'
-    if (v < 800) return 'medium'
-    return 'large'
-  }
-  const grouped = TYPE_GROUPS.map((g) => ({
-    label: g.label,
-    homes: HOUSES.filter((h) => archetypes[h].type === g.type).map((h) => ({
-      id: h,
-      text: `${sizeLabel(archetypes[h].total_volume_m3)} · ${Math.round(archetypes[h].total_volume_m3)} m³ (${h})`,
-    })),
-  }))
 
   let arche = $derived(archetypes[house])
   let kvol = $derived(arche?.kitchen_volume_m3 ?? 30)
@@ -107,10 +113,10 @@
   // Personal exposure (chosen time-in-kitchen) and kitchen-air metrics
   // (high-kitchen-occupancy scenario, where personal exposure ≈ kitchen air).
   let exp = $derived(
-    weightedExposure({ house, hood, use, win, oc, temps: expTemps, winds: expWinds, outdoorNO2: outdoor })
+    interpExposure({ hood, use, win, oc, temps: expTemps, winds: expWinds, outdoorNO2: outdoor }, bracket)
   )
   let kitchenExp = $derived(
-    weightedExposure({ house, hood, use, win, oc: 'ninetyfifth_kitchen', temps: expTemps, winds: expWinds, outdoorNO2: outdoor })
+    interpExposure({ hood, use, win, oc: 'ninetyfifth_kitchen', temps: expTemps, winds: expWinds, outdoorNO2: outdoor }, bracket)
   )
 
   // --- headline values (stove component scaled by the fine-tune multiplier) ---
@@ -131,11 +137,11 @@
   // --- "what helps" interventions: resulting annual ppb + % reduction ---
   let whatHelps = $derived.by(() => {
     const annualOf = (mods) => {
-      const e = weightedExposure({
-        house, hood: mods.hood ?? hood, use: mods.use ?? use, win: mods.win ?? win,
+      const e = interpExposure({
+        hood: mods.hood ?? hood, use: mods.use ?? use, win: mods.win ?? win,
         oc, temps: expTemps, winds: expWinds, outdoorNO2: outdoor,
         penUse: use, // keep penetration at the current cooking level (esp. for electric)
-      })
+      }, bracket)
       const sm = mods.use === 'zero' ? 0 : stoveMult
       return e.stoveLong * sm + e.outdoorLong
     }
@@ -219,14 +225,28 @@
 
       <div class="field">
         <div class="seg-label">Home type</div>
-        <select bind:value={house}>
-          {#each grouped as g}
-            <optgroup label={g.label}>
-              {#each g.homes as h}<option value={h.id}>{g.label} — {h.text}</option>{/each}
-            </optgroup>
-          {/each}
+        <select bind:value={homeType}>
+          {#each TYPE_GROUPS as g}<option value={g.type}>{g.label}</option>{/each}
         </select>
-        <div class="kv">Kitchen ≈ {fmt(kvol)} m³ · whole home ≈ {fmt(arche?.total_volume_m3)} m³</div>
+      </div>
+
+      <div class="field">
+        <div class="seg-head">
+          <span class="seg-label">Total floor area</span>
+          <span class="seg-hint">{Math.round(floorArea).toLocaleString()} ft²</span>
+        </div>
+        <input type="range" min={areaRange[0]} max={areaRange[1]} step="10"
+               bind:value={floorArea} aria-label="Total floor area, square feet"
+               disabled={areaRange[0] === areaRange[1]} />
+        <div class="kv">
+          {#if bracket && bracket.below !== bracket.above}
+            interpolating between {bracket.below} ({archetypes[bracket.below].floor_area_ft2.toLocaleString()} ft²)
+            and {bracket.above} ({archetypes[bracket.above].floor_area_ft2.toLocaleString()} ft²)
+          {:else}
+            closest archetype: {house}
+          {/if}
+          · kitchen ≈ {fmt(kvol)} m³
+        </div>
       </div>
 
       <Segmented label="Stove use" options={USE_OPTIONS} bind:value={use} />

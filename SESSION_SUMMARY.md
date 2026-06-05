@@ -1,10 +1,26 @@
 # Session Summary & Handoff — NO₂ Exposure Suite
 
 *Updated 2026-06-04. Written so a fresh session can take over with no prior context.*
-*Update 2026-06-05: Persily full-suite integration done — see `PLAN.md` Phase 4 (4a–4d-apt
-complete: transformer, 227-home library, floor-area selection/interpolation, scheduled mechanical
-ventilation, and full-building apartment stack with a "which floor?" selector). Remaining: 4e
-Explorer floor-area selection, queued UI changes, and a reduced-order model for tall high-rises.*
+
+## ▶ NEXT SESSION — START HERE
+**The user will describe UI issues to fix** across the two apps (Explorer = public widget,
+CONTAM-Lite = research Streamlit). Begin by asking them to describe the UI issues, then implement.
+The physics/feature work (Phase 4) is done; this is a UI/UX polish pass. To run the apps while
+working: `python3 -m streamlit run contam-lite/app.py` (port 5181) and
+`npm run dev --prefix explorer` (port 5180) — or use the `.claude/launch.json` configs.
+
+After the UI pass, **deploy the Explorer**:
+`npm run build --prefix explorer && cp explorer/dist/index.html docs/ && git commit -am "…" && git push`
+(GitHub Pages serves `docs/`; ~1 min to go live at psehe.github.io/no2-exposure-suite).
+
+*Update 2026-06-05: Persily full-suite integration COMPLETE — Phase 4a–4e (see `PLAN.md`): the .prj
+transformer (validated to ~1% vs the paper homes), the 227-home library, CONTAM-Lite floor-area
+selection + interpolation, scheduled mechanical ventilation (each home's own AHS exhaust fans),
+the full-building apartment stack with a "which floor do you live on?" selector, and the Explorer
+floor-area slider that interpolates among the 24. 4a–4d-apt are committed + pushed (55f22b4); 4e is
+committed but NOT yet deployed to docs/ (do that as part of the UI-pass deploy above). Still open:
+a reduced-order model for tall apartment high-rises (>200 zones, deferred); the deprecated
+`use_container_width`→`width='stretch'` cleanup in contam-lite/app.py.*
 
 ---
 

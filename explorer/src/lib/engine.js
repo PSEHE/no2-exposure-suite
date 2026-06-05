@@ -4,6 +4,7 @@
 // stored CONTAM result.
 
 import library from '@data/scenario_library.json'
+import archetypes from '@data/archetypes.json'
 import { OUTDOOR_FRACTION } from './constants.js'
 
 const clamp = (x, lo, hi) => Math.max(lo, Math.min(hi, x))
@@ -162,4 +163,53 @@ export function selectArchetype(typehuq, sqftrange, vintage, stories, centralAC)
     return 'APT-62'
   }
   return yesAC ? 'APT-35' : 'APT-28'
+}
+
+// --- Floor-area selection / interpolation among the 24 ---
+// The user describes a home (type + total floor area); we bracket the two homes
+// of that type nearest in floor area and interpolate their exposure outputs.
+
+// Homes of a type, sorted by floor area (ft²): [{ id, area }].
+export function homesByArea(type) {
+  return HOUSES
+    .filter((h) => archetypes[h].type === type && archetypes[h].floor_area_ft2 != null)
+    .map((h) => ({ id: h, area: archetypes[h].floor_area_ft2 }))
+    .sort((a, b) => a.area - b.area)
+}
+
+// Two homes bracketing `floorArea` within a type, plus the weight toward the
+// larger. Clamps at the ends (no extrapolation).
+export function bracketByArea(type, floorArea) {
+  const pool = homesByArea(type)
+  if (!pool.length) return null
+  if (floorArea <= pool[0].area) return { below: pool[0].id, above: pool[0].id, w: 0, pool }
+  const top = pool[pool.length - 1]
+  if (floorArea >= top.area) return { below: top.id, above: top.id, w: 1, pool }
+  let lo = pool[0], hi = top
+  for (let i = 0; i < pool.length - 1; i++) {
+    if (pool[i].area <= floorArea && floorArea <= pool[i + 1].area) {
+      lo = pool[i]; hi = pool[i + 1]; break
+    }
+  }
+  const span = hi.area - lo.area
+  return { below: lo.id, above: hi.id, w: span > 0 ? (floorArea - lo.area) / span : 0, pool }
+}
+
+// Linearly blend two exposure result objects (numeric fields) toward `above`.
+function blendExposure(a, b, w) {
+  if (!b || w === 0) return a
+  if (w === 1) return b
+  const out = {}
+  for (const k of Object.keys(a)) {
+    out[k] = typeof a[k] === 'number' ? a[k] * (1 - w) + b[k] * w : a[k]
+  }
+  return out
+}
+
+// weightedExposure for a described home: interpolate between the bracketing homes.
+export function interpExposure(args, bracket) {
+  if (!bracket) return weightedExposure(args)
+  const a = weightedExposure({ ...args, house: bracket.below })
+  if (bracket.above === bracket.below) return a
+  return blendExposure(a, weightedExposure({ ...args, house: bracket.above }), bracket.w)
 }

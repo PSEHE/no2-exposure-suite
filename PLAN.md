@@ -180,9 +180,16 @@ Decisions: pool both; vintage axis = pre-2000 / 2000+; metadata from TN 2329 App
 - [x] Covers the **49 tractable buildings** (≤200 zones, ≥2 floors). The 20 tall high-rises
       (11–21 storeys, >200 zones) are deferred to a reduced-order stack column.
 
-### 4e. Explorer floor-area selection  ⬜
-- [ ] Floor area + type/stories → select/interpolate among the validated 24 (lightweight, no live
-      physics). Open question: stay on 24 vs. offline-precompute a CS-11 library.
+### 4e. Explorer floor-area selection  ✅
+- [x] `export_web_data.build_archetypes` adds `floor_area_ft2` + `stories` to the 24 (full parse);
+      `web_data/archetypes.json` regenerated.
+- [x] `engine.js`: `homesByArea`/`bracketByArea`/`interpExposure` — bracket the two homes of a type
+      nearest in floor area and linearly blend their exposure outputs.
+- [x] `App.svelte`: home described by type + a **total-floor-area slider** (range adapts per type);
+      shows "interpolating between X and Y"; ZIP sets type+area. Verified: exposure moves with area
+      (DH 1,032 ft² → worst 1-hr 50 ppb; 2,072 ft² → 38 ppb). Built (930 KB gz), no console errors.
+- [~] Caveats for the UI pass: MH homes are all 928 ft² (degenerate slider); the 24's APT areas are
+      building-scale (2,798–32,443 ft²), not unit-scale. Not yet copied to docs/ or deployed.
 
 ---
 *Drafted by Claude with prompts engineered by Yannai Kashtan*

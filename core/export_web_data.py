@@ -14,7 +14,7 @@ import json
 import numpy as np
 import pandas as pd
 
-from . import config, constants, library
+from . import config, constants, library, prj, transform
 
 
 def _round_sig(x, sig=4):
@@ -152,11 +152,20 @@ def build_archetypes():
         house = r["House"]
         if house not in constants.HOUSES:
             continue
-        prj = config.DATABASE_HOUSES / house / f"{house}.prj"
-        vols = _zone_volumes(prj) if prj.exists() else {}
+        prj_file = config.DATABASE_HOUSES / house / f"{house}.prj"
+        vols = _zone_volumes(prj_file) if prj_file.exists() else {}
         kitchen_id = int(r["Kitchen"]) if not pd.isna(r["Kitchen"]) else None
         total_vol = round(sum(v for v, _ in vols.values()), 1) if vols else None
         kvol = round(vols[kitchen_id][0], 1) if kitchen_id in vols else None
+        # Conditioned floor area (ft²) + storey count from the full parse (levels).
+        floor_area_ft2 = stories = None
+        try:
+            model = prj.parse_prj(config.prj_path(house))
+            floor_area_ft2 = round(model.floor_area_m2() * 10.7639)
+            stories = len({z.level for z in model.zones.values()
+                           if transform.is_living(z.name)}) or None
+        except Exception:
+            pass
         out[house] = {
             "type": house.split("-")[0],
             "type_name": _TYPE_NAMES.get(house.split("-")[0], house),
@@ -169,6 +178,8 @@ def build_archetypes():
             "n_zones": len(vols) if vols else None,
             "total_volume_m3": total_vol,
             "kitchen_volume_m3": kvol,
+            "floor_area_ft2": floor_area_ft2,
+            "stories": stories,
         }
     return out
 
