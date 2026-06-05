@@ -134,6 +134,7 @@
       const e = weightedExposure({
         house, hood: mods.hood ?? hood, use: mods.use ?? use, win: mods.win ?? win,
         oc, temps: expTemps, winds: expWinds, outdoorNO2: outdoor,
+        penUse: use, // keep penetration at the current cooking level (esp. for electric)
       })
       const sm = mods.use === 'zero' ? 0 : stoveMult
       return e.stoveLong * sm + e.outdoorLong

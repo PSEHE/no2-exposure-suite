@@ -66,7 +66,7 @@ export function lookup(house, hood, use, win, temp, wind, oc) {
 //     outdoor_attributable = outdoor * [ (1 - f_out) * pen + f_out ]
 // with f_out the fraction of at-home time spent outdoors (full outdoor).
 //   temps: [[token, weight], ...]   winds: [[token, weight], ...]
-export function weightedExposure({ house, hood, use, win, oc, temps, winds, outdoorNO2 = 0 }) {
+export function weightedExposure({ house, hood, use, win, oc, temps, winds, outdoorNO2 = 0, penUse = null }) {
   const fout = OUTDOOR_FRACTION[oc] ?? 0
   let stoveLong = 0, outdoorLong = 0, stoveHrW = 0
   let stoveHrMax = 0, stove8Max = 0, peakMax = 0, wsum = 0
@@ -75,12 +75,16 @@ export function weightedExposure({ house, hood, use, win, oc, temps, winds, outd
       const c = tw * ww
       if (!c) continue
       const r = lookup(house, hood, use, win, t, wd, oc)
-      // Outdoor penetration is a building/ventilation property — independent of
-      // the stove fuel/use. Derive its window-response from a fixed cooking
-      // reference ('high'), so switching to electric (use='zero') doesn't change
-      // it, and it stays monotonic. CONTA is itself use-independent.
-      const refWin = lookup(house, hood, PEN_REF_USE, win, t, wd, oc)
-      const refClosed = lookup(house, hood, PEN_REF_USE, 'closed', t, wd, oc)
+      // Outdoor penetration's window-response is tied to the cooking level being
+      // shown, so it tracks the actual stove dilution and stays monotonic under
+      // clean outdoor. For no-cook/electric, fall back to a cooking reference so
+      // penetration remains a building property (and the electric comparison can
+      // pass penUse = the gas use to keep it identical). CONTA is use-independent.
+      const pu0 = penUse || use
+      const puHasStove = lookup(house, hood, pu0, 'closed', t, wd, oc).no2.dayavg > 1e-9
+      const pu = puHasStove ? pu0 : PEN_REF_USE
+      const refWin = lookup(house, hood, pu, win, t, wd, oc)
+      const refClosed = lookup(house, hood, pu, 'closed', t, wd, oc)
       const penClosed = clamp((refClosed.conta.dayavg / 100 - fout) / (1 - fout), 0, 1)
       const R = refClosed.no2.dayavg > 1e-9
         ? clamp(refWin.no2.dayavg / refClosed.no2.dayavg, 0, 1) // stove dilution ratio
