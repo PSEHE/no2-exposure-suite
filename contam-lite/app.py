@@ -47,6 +47,56 @@ COOKING_PATTERNS = {
 TYPE_NAMES = {"DH": "Detached", "AH": "Attached", "MH": "Manufactured", "APT": "Apartment"}
 
 
+def _pattern_no2_total(pattern):
+    """Total daily stove NO₂ of a cooking pattern (kg, at standard rates)."""
+    tot = 0.0
+    for e in pattern:
+        dur = e["min"] * 60.0
+        if e.get("cooktop", True):
+            tot += dur * transport.STD_COOKTOP_KG_S
+        if e.get("oven", False):
+            tot += dur * transport.STD_OVEN_KG_S
+    return tot
+
+
+# Cooking-amount slider anchors: the three patterns on a "× typical household"
+# scale (their total emissions relative to Average). Light/Heavy sit near the
+# 5th/95th percentiles of household cooking in the papers' behavioral axis.
+_T_AVG = _pattern_no2_total(COOKING_PATTERNS["Average (breakfast + dinner)"])
+COOKING_ANCHORS = [
+    (name, COOKING_PATTERNS[name], _pattern_no2_total(COOKING_PATTERNS[name]) / _T_AVG)
+    for name in ("Light (one short meal)", "Average (breakfast + dinner)",
+                 "Heavy (3 meals, oven)")]
+COOKING_AMOUNT_MAX = 3.0
+
+
+def cooking_from_amount(amount):
+    """Map the cooking-amount slider to (pattern, emission_scale).
+
+    Uses the nearest anchor's meal SCHEDULE (boundaries at tick midpoints) and
+    scales its emissions so total stove NO₂ varies continuously with the
+    slider; at each tick the anchor pattern is reproduced exactly (scale 1).
+    amount<=0 means no cooking."""
+    if amount <= 0:
+        return [], 0.0
+    ticks = [t for _, _, t in COOKING_ANCHORS]
+    bounds = [(ticks[0] + ticks[1]) / 2, (ticks[1] + ticks[2]) / 2]
+    i = 0 if amount < bounds[0] else (1 if amount < bounds[1] else 2)
+    _, pattern, tick = COOKING_ANCHORS[i]
+    return pattern, amount / tick
+
+
+def _cooking_marks_html():
+    """Unobtrusive tick marks under the cooking slider at the anchor positions."""
+    marks = "".join(
+        f'<span style="position:absolute;left:{t / COOKING_AMOUNT_MAX * 100:.1f}%;'
+        f'transform:translateX(-50%);color:#9aa0a6;font-size:9px;'
+        f'line-height:1;">▲</span>'
+        for _, _, t in COOKING_ANCHORS)
+    return (f'<div style="position:relative;height:10px;margin-top:-10px;">'
+            f'{marks}</div>')
+
+
 @st.cache_resource
 def load_archetypes():
     with open(ROOT / "web_data" / "archetypes.json") as f:
@@ -152,13 +202,17 @@ def metrics_row(k_avg, mx1, rest_avg):
                    "(kitchen excluded; unconditioned spaces excluded).")
 
 
-def scenario_sidebar(prefix="", no2_default=7.0, window_style="fraction"):
+def scenario_sidebar(prefix="", no2_default=7.0, window_style="fraction",
+                     cooking_style="menu"):
     """Shared environment/ventilation/cooking knobs -> a simulate() kwargs dict.
 
     window_style="fraction": the research-grade 0..1 opening slider (diagnostics).
     window_style="hours": hours-per-day budget + which-windows menu + an
     open-during-cooking toggle; the concrete schedule is resolved per model by
-    apply_window_spec() (the kitchen zone id differs per home)."""
+    apply_window_spec() (the kitchen zone id differs per home).
+    cooking_style="menu": meal-pattern menu + burner-intensity slider
+    (diagnostics). "slider": one cooking-amount slider with tick marks at the
+    Light/Average/Heavy anchors (see cooking_from_amount)."""
     st.sidebar.subheader("Environment")
     T_out = st.sidebar.slider("Outdoor temperature (°C)", -15, 38, 5, key=f"{prefix}T")
     wind = st.sidebar.slider("Wind speed (m/s)", 0.0, 12.0, 3.0, 0.5, key=f"{prefix}w")
@@ -197,13 +251,24 @@ def scenario_sidebar(prefix="", no2_default=7.0, window_style="fraction"):
                                "50CE": "Good (50%)", "75CE": "High-efficiency (75%)"}[h],
         key=f"{prefix}h")
     st.sidebar.subheader("Cooking")
-    pattern = st.sidebar.selectbox("Meal pattern", list(COOKING_PATTERNS), index=2,
-                                   key=f"{prefix}p")
-    intensity = st.sidebar.slider("Burner intensity (× one burner)", 0.5, 4.0, 1.0, 0.25,
-                                  key=f"{prefix}i")
+    if cooking_style == "slider":
+        amount = st.sidebar.slider("Cooking amount (× typical household)",
+                                   0.0, COOKING_AMOUNT_MAX, 1.0, 0.05,
+                                   key=f"{prefix}ca")
+        st.sidebar.markdown(_cooking_marks_html(), unsafe_allow_html=True)
+        st.sidebar.caption("▲ middle: most households cook like this · "
+                           "▲ lower and upper: about 5% of households "
+                           "cook like this")
+        cooking, emission_scale = cooking_from_amount(amount)
+    else:
+        pattern = st.sidebar.selectbox("Meal pattern", list(COOKING_PATTERNS),
+                                       index=2, key=f"{prefix}p")
+        emission_scale = st.sidebar.slider("Burner intensity (× one burner)",
+                                           0.5, 4.0, 1.0, 0.25, key=f"{prefix}i")
+        cooking = COOKING_PATTERNS[pattern]
     scenario = dict(T_out_C=T_out, wind_ms=wind, window_open=window_open, hood=hood,
-                    cooking=COOKING_PATTERNS[pattern], C_out_ppb=outdoor_no2,
-                    emission_scale=intensity)
+                    cooking=cooking, C_out_ppb=outdoor_no2,
+                    emission_scale=emission_scale)
     if spec is not None:
         scenario["_window_spec"] = spec
     return scenario
@@ -309,8 +374,9 @@ if panel == "Single home":
             pick = st.sidebar.selectbox("Kitchen zone (no stove source in file)", list(zopts))
             upload_kitchen = zopts[pick]
 
-    # --- shared scenario knobs (hours-based window schedule) ---
-    scenario = scenario_sidebar(prefix="sh_", window_style="hours")
+    # --- shared scenario knobs (hours-based windows, cooking-amount slider) ---
+    scenario = scenario_sidebar(prefix="sh_", window_style="hours",
+                                cooking_style="slider")
 
     st.title("Single-home NO₂")
 
