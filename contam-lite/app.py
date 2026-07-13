@@ -17,7 +17,13 @@ sys.path.insert(0, str(ROOT))
 import json
 import numpy as np
 import plotly.graph_objects as go
+import plotly.io as pio
 import streamlit as st
+
+# stdlib JSON engine: plotly's lazy orjson import can race under Streamlit's
+# rerun threads and poison the session ("partially initialized module");
+# figures here are small, so the faster engine buys nothing.
+pio.json.config.default_engine = "json"
 
 from core import (config, constants, diagnostics as dg, prj, transport,
                   population, persily, transform, apartments)
@@ -119,6 +125,13 @@ def home_avg_curve(res):
     return np.mean(arrs, axis=0) if arrs else np.zeros_like(res["t"])
 
 
+def rest_avg_curve(res, kitchen_name):
+    """Mean NO₂ over living zones EXCLUDING the kitchen (rest of the house)."""
+    arrs = [a for n, a in res["by_zone"].items()
+            if transform.is_living(n) and n != kitchen_name]
+    return np.mean(arrs, axis=0) if arrs else np.zeros_like(res["t"])
+
+
 def run_persily(entry, scenario):
     """Simulate a Persily home under the scenario; return (res, kitchen_name, kitchen_curve)."""
     m = load_persily_model(entry["rel_path"])
@@ -128,16 +141,15 @@ def run_persily(entry, scenario):
     return res, kname, res["by_zone"].get(kname, np.zeros_like(res["t"]))
 
 
-def metrics_row(ach, peak, mx1, davg):
-    c1, c2, c3, c4 = st.columns(4)
-    c1.metric("Air exchange (living space)", f"{ach:.2f} /h",
-              help="Outdoor air delivered directly to conditioned rooms. "
-                   "Excludes attic/crawlspace cross-flow, which inflates "
-                   "whole-home ACH without ventilating the living space.")
-    c2.metric("Kitchen peak NO₂", f"{peak:.0f} ppb")
-    c3.metric("Kitchen max 1-hr", f"{mx1:.0f} ppb",
+def metrics_row(k_avg, mx1, rest_avg):
+    c1, c2, c3 = st.columns(3)
+    c1.metric("Average NO₂ in kitchen", f"{k_avg:.1f} ppb",
+              help="24-hour average kitchen concentration.")
+    c2.metric("Kitchen max 1-hr average", f"{mx1:.0f} ppb",
               delta=f"{mx1 - EPA_1HR:.0f} vs EPA/WHO 1-hr", delta_color="inverse")
-    c4.metric("Kitchen daily avg", f"{davg:.1f} ppb")
+    c3.metric("Average NO₂ in rest of the house", f"{rest_avg:.1f} ppb",
+              help="24-hour average over the other living rooms "
+                   "(kitchen excluded; unconditioned spaces excluded).")
 
 
 def scenario_sidebar(prefix="", no2_default=7.0, window_style="fraction"):
@@ -305,26 +317,27 @@ if panel == "Single home":
     # ----------- Describe your home: select the right floorplan + interpolate -----------
     if mode == "Describe your home":
         below, above, w = bracket
-        res_b, _, kit_b = run_persily(below, scenario)
+        res_b, kn_b, kit_b = run_persily(below, scenario)
         if above["id"] == below["id"]:
             t, kitchen, havg = res_b["t"], kit_b, home_avg_curve(res_b)
-            ach = res_b["living_ach"]
+            rest = rest_avg_curve(res_b, kn_b)
             st.caption(
                 f"Closest available {TYPE_NAMES[below['type']]} home: **{below['floor_area_ft2']:,} ft²** "
                 f"({below['id']}); target is at the edge of the range, so no interpolation was needed. "
                 "Fidelity for non-paper homes is physically faithful but unvalidated.")
         else:
-            res_a, _, kit_a = run_persily(above, scenario)
+            res_a, kn_a, kit_a = run_persily(above, scenario)
             t = res_b["t"]
             kitchen = (1 - w) * kit_b + w * kit_a
             havg = (1 - w) * home_avg_curve(res_b) + w * home_avg_curve(res_a)
-            ach = (1 - w) * res_b["living_ach"] + w * res_a["living_ach"]
+            rest = ((1 - w) * rest_avg_curve(res_b, kn_b)
+                    + w * rest_avg_curve(res_a, kn_a))
             st.caption(
                 f"Interpolated between **{below['id']}** ({below['floor_area_ft2']:,} ft²) and "
                 f"**{above['id']}** ({above['floor_area_ft2']:,} ft²) — {w:.0%} of the way to the larger. "
                 "Fidelity for non-paper homes is physically faithful but unvalidated.")
-        peak = float(np.max(kitchen[:144]))
-        metrics_row(ach, peak, rolling_max_1h(kitchen), float(np.mean(kitchen[:144])))
+        metrics_row(float(np.mean(kitchen[:144])), rolling_max_1h(kitchen),
+                    float(np.mean(rest[:144])))
 
         st.subheader("NO₂ over 24 hours")
         fig = go.Figure()
@@ -363,8 +376,11 @@ if panel == "Single home":
             + (f", unit {apt_tag}" if apt_tag else "")
             + ". Whole-building stack effect modeled through the stairwell; your unit is shown. "
             "Fidelity for non-paper homes is physically faithful but unvalidated.")
-        metrics_row(res["living_ach"], float(np.max(kitchen[:144])),
-                    rolling_max_1h(kitchen), float(np.mean(kitchen[:144])))
+        rest_cols = [zone_ids.index(z) for z in unit_zids if z != kid]
+        rest = (np.mean(res["series"][:, rest_cols], axis=1) if rest_cols
+                else np.zeros_like(t))
+        metrics_row(float(np.mean(kitchen[:144])), rolling_max_1h(kitchen),
+                    float(np.mean(rest[:144])))
 
         st.subheader("NO₂ over 24 hours — your unit")
         fig = go.Figure()
@@ -409,7 +425,8 @@ if panel == "Single home":
         st.caption(f"{home_title} · {len(model.paths)} flow paths · "
                    "first-principles airflow + transport (not a lookup).")
         davg = res["summary"][kname]["dayavg"] if kname in res["summary"] else float(np.mean(kitchen))
-        metrics_row(res["living_ach"], float(np.max(kitchen)), rolling_max_1h(kitchen), davg)
+        rest = rest_avg_curve(res, kname)
+        metrics_row(davg, rolling_max_1h(kitchen), float(np.mean(rest[:144])))
 
         st.subheader("NO₂ concentration over 24 hours")
         ranked = sorted(res["summary"].items(), key=lambda kv: -kv[1]["peak"])
