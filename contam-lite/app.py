@@ -86,15 +86,19 @@ def cooking_from_amount(amount):
     return pattern, amount / tick
 
 
-def _cooking_marks_html():
+def _cooking_marks_html(vmax=COOKING_AMOUNT_MAX):
     """Unobtrusive tick marks under the cooking slider at the anchor positions."""
     marks = "".join(
-        f'<span style="position:absolute;left:{t / COOKING_AMOUNT_MAX * 100:.1f}%;'
+        f'<span style="position:absolute;left:{t / vmax * 100:.1f}%;'
         f'transform:translateX(-50%);color:#9aa0a6;font-size:9px;'
         f'line-height:1;">▲</span>'
         for _, _, t in COOKING_ANCHORS)
     return (f'<div style="position:relative;height:10px;margin-top:-10px;">'
             f'{marks}</div>')
+
+
+COOKING_LEGEND = ("▲ middle: most households cook like this · "
+                  "▲ lower and upper: about 5% of households cook like this")
 
 
 @st.cache_resource
@@ -256,9 +260,7 @@ def scenario_sidebar(prefix="", no2_default=7.0, window_style="fraction",
                                    0.0, COOKING_AMOUNT_MAX, 1.0, 0.05,
                                    key=f"{prefix}ca")
         st.sidebar.markdown(_cooking_marks_html(), unsafe_allow_html=True)
-        st.sidebar.caption("▲ middle: most households cook like this · "
-                           "▲ lower and upper: about 5% of households "
-                           "cook like this")
+        st.sidebar.caption(COOKING_LEGEND)
         cooking, emission_scale = cooking_from_amount(amount)
     else:
         pattern = st.sidebar.selectbox("Meal pattern", list(COOKING_PATTERNS),
@@ -525,14 +527,29 @@ elif panel == "Population & health":
     st.sidebar.subheader("Population")
     gas_pct = st.sidebar.slider("Homes cooking with gas/propane (%)", 0, 100, 38)
     hood_adopt = st.sidebar.slider("Homes with an effective vented hood (%)", 0, 100, 22)
-    cook_int = st.sidebar.slider("Cooking intensity (light → heavy)", 0.0, 1.0, 0.35, 0.05)
+    st.sidebar.subheader("Cooking")
+    POP_COOK_MAX = 2.0
+    cook_amt = st.sidebar.slider("Cooking amount (× typical household)",
+                                 0.0, POP_COOK_MAX, 1.0, 0.05, key="pop_ca")
+    st.sidebar.markdown(_cooking_marks_html(vmax=POP_COOK_MAX), unsafe_allow_html=True)
+    st.sidebar.caption(COOKING_LEGEND)
+    st.sidebar.subheader("Ventilation")
+    win_h = st.sidebar.slider("Window open time (hours/day)", 0.0, 24.0,
+                              population.DEF_WINDOW_MEAN_HOURS, 0.1, key="pop_wh")
+    st.sidebar.caption("Population-average window behavior (the library's window "
+                       "axis is an all-day category, so kitchen-only or "
+                       "cooking-timed opening isn't representable here — use the "
+                       "Single-home panel for those).")
     size_shift = st.sidebar.slider("Home size (smaller ← → larger)", -1.0, 1.0, 0.0, 0.1)
     climate = st.sidebar.selectbox("Climate", list(population.CLIMATE_TEMP), index=2)
 
+    use_d, sub_light = population.use_from_amount(
+        cook_amt, tuple(t for _, _, t in COOKING_ANCHORS))
     mean = population.population_mean_exposure(
         house_w=population.home_size_weights(size_shift),
         hood=population.hood_dist(hood_adopt / 100),
-        use=population.use_dist(cook_int), climate=climate)
+        use=use_d, window=population.window_hours_dist(win_h),
+        climate=climate) * sub_light
     gas_frac = gas_pct / 100
     pop_mean = mean * gas_frac      # averaged over all homes (electric add 0 stove NO2)
     out = population.health_outcomes(mean, gas_frac)

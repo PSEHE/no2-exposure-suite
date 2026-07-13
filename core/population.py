@@ -114,6 +114,58 @@ def use_dist(intensity):
     return {"low": 0.6 * (1 - x), "med": 0.3 + 0.2 * x, "medNoBk": 0.1, "high": 0.6 * x}
 
 
+# The panel's historical central case: use_dist(0.35) anchors the published
+# burdens, so the "x typical" cooking slider must reproduce it at the middle
+# (typical-household) tick.
+DEFAULT_COOK_INTENSITY = 0.35
+# Mean open-hours of the papers' central window mix (0.70/0.25/0.05 over
+# closed/moderate 4h/open 24h): 0.25*4 + 0.05*24.
+DEF_WINDOW_MEAN_HOURS = 2.2
+
+
+def use_from_amount(amount, ticks):
+    """Map the single-home-style cooking slider (x typical household) to a
+    population (use_dist, sub_light_scale).
+
+    `ticks` = the (light, typical, heavy) anchor positions from the single-home
+    slider. Piecewise linear so the anchors land exactly: light tick -> all
+    light-cooking households, typical tick -> the papers' central case, heavy
+    tick and above -> all heavy. Below the light tick, the library can't cook
+    less, so the returned scale (amount/light_tick -> 0) linearly damps the
+    stove-NO2 mean toward zero (0 = nobody cooks)."""
+    tl, tm, th = ticks
+    if amount <= 0:
+        return use_dist(0.0), 0.0
+    if amount < tl:
+        return use_dist(0.0), amount / tl
+    if amount <= tm:
+        x = DEFAULT_COOK_INTENSITY * (amount - tl) / (tm - tl)
+    else:
+        x = (DEFAULT_COOK_INTENSITY
+             + (1.0 - DEFAULT_COOK_INTENSITY) * min(1.0, (amount - tm) / (th - tm)))
+    return use_dist(x), 1.0
+
+
+def window_hours_dist(hours):
+    """Population window mix from a mean open-hours-per-day slider.
+
+    Piecewise-linear blend through three anchor distributions: 0 h -> all
+    closed, DEF_WINDOW_MEAN_HOURS -> the papers' central mix (exactly, so the
+    default anchors the published burdens), 24 h -> all open. The library's
+    window axis is an all-day behavior category, so per-room or cooking-timed
+    opening (single-home features) is NOT representable here."""
+    h = max(0.0, min(24.0, float(hours)))
+    closed = {"closed": 1.0, "moderate": 0.0, "open": 0.0}
+    opend = {"closed": 0.0, "moderate": 0.0, "open": 1.0}
+    if h <= DEF_WINDOW_MEAN_HOURS:
+        w = h / DEF_WINDOW_MEAN_HOURS
+        lo, hi = closed, DEF_WINDOW
+    else:
+        w = (h - DEF_WINDOW_MEAN_HOURS) / (24.0 - DEF_WINDOW_MEAN_HOURS)
+        lo, hi = DEF_WINDOW, opend
+    return {k: (1 - w) * lo[k] + w * hi[k] for k in ("closed", "moderate", "open")}
+
+
 def home_size_weights(shift):
     """shift -1 (smaller homes) .. +1 (larger). Reweights house_weights by total
     home volume (smaller homes -> higher exposure)."""
