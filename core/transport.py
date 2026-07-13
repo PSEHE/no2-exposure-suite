@@ -39,6 +39,64 @@ DEFAULT_SHOWER = [(7.0, 20.0), (20.0, 20.0)]   # (start hour, duration minutes)
 STD_COOKTOP_KG_S = 3.1878e-8
 STD_OVEN_KG_S = 3.66597e-8
 
+# Opening fraction of an "open" window — the library's calibrated open state.
+OPEN_FRACTION = 0.7
+
+
+def window_schedule_from_hours(hours_per_day, *, cooking=None, during_cooking=True,
+                               start_hour=12.0, open_value=OPEN_FRACTION):
+    """Build a window_schedule from a daily open-time budget (hours).
+
+    during_cooking=True (and a cooking pattern given): a window opens when each
+    cooking event STARTS and lingers after the burners turn off — the budget is
+    split across events in proportion to each event's duration. Blocks cascade:
+    if the previous opening is still running when the next meal starts, the next
+    block begins where it left off (total open time is preserved, not
+    double-counted). Time past midnight wraps to the morning.
+
+    during_cooking=False (or no cooking events): one contiguous block starting
+    at `start_hour`, wrapping past midnight if needed.
+
+    hours<=0 -> [] (closed all day); hours>=24 -> open all day.
+    `open_value` may be a scalar fraction or a {zone_id: fraction} dict
+    (e.g. kitchen window only)."""
+    h = float(hours_per_day)
+    if h <= 0:
+        return []
+    if h >= 24:
+        return [{"start": 0.0, "hours": 24.0, "open": open_value}]
+
+    events = sorted(cooking or [], key=lambda e: e["start"]) if during_cooking else []
+    blocks = []
+    if events:
+        total_min = sum(e["min"] for e in events)
+        if total_min > 0:
+            cursor = 0.0
+            for e in events:
+                share = h * (e["min"] / total_min)
+                s = max(float(e["start"]), cursor)
+                blocks.append((s, share))
+                cursor = s + share
+    if not blocks:
+        blocks = [(float(start_hour), h)]
+
+    # wrap anything past midnight to the morning (clamped before the first block)
+    sched = []
+    overflow = 0.0
+    for s, d in blocks:
+        if s >= 24.0:
+            overflow += d
+            continue
+        if s + d > 24.0:
+            overflow += (s + d) - 24.0
+            d = 24.0 - s
+        sched.append({"start": s, "hours": d, "open": open_value})
+    if overflow > 0:
+        first = min(b["start"] for b in sched) if sched else 24.0
+        sched.insert(0, {"start": 0.0, "hours": min(overflow, first),
+                         "open": open_value})
+    return sched
+
 
 def _no2_sources(model, kitchen_zone=None):
     """Per-zone NO2 source rates (kg/s) split into cooktop and oven.

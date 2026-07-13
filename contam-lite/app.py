@@ -123,7 +123,7 @@ def run_persily(entry, scenario):
     """Simulate a Persily home under the scenario; return (res, kitchen_name, kitchen_curve)."""
     m = load_persily_model(entry["rel_path"])
     kid = transform.kitchen_zone_id(m)
-    res = transport.simulate(m, kitchen_zone=kid, **scenario)
+    res = transport.simulate(m, kitchen_zone=kid, **apply_window_spec(scenario, kid))
     kname = m.zones[kid].name if kid is not None else None
     return res, kname, res["by_zone"].get(kname, np.zeros_like(res["t"]))
 
@@ -140,16 +140,45 @@ def metrics_row(ach, peak, mx1, davg):
     c4.metric("Kitchen daily avg", f"{davg:.1f} ppb")
 
 
-def scenario_sidebar(prefix="", no2_default=7.0):
-    """Shared environment/ventilation/cooking knobs -> a simulate() kwargs dict."""
+def scenario_sidebar(prefix="", no2_default=7.0, window_style="fraction"):
+    """Shared environment/ventilation/cooking knobs -> a simulate() kwargs dict.
+
+    window_style="fraction": the research-grade 0..1 opening slider (diagnostics).
+    window_style="hours": hours-per-day budget + which-windows menu + an
+    open-during-cooking toggle; the concrete schedule is resolved per model by
+    apply_window_spec() (the kitchen zone id differs per home)."""
     st.sidebar.subheader("Environment")
     T_out = st.sidebar.slider("Outdoor temperature (°C)", -15, 38, 5, key=f"{prefix}T")
     wind = st.sidebar.slider("Wind speed (m/s)", 0.0, 12.0, 3.0, 0.5, key=f"{prefix}w")
     outdoor_no2 = st.sidebar.slider("Outdoor NO₂ (ppb)", 0.0, 40.0, no2_default, 0.5,
                                     key=f"{prefix}o")
     st.sidebar.subheader("Ventilation")
-    window_open = st.sidebar.slider("Window opening (0 = closed, 1 = wide)",
-                                    0.0, 1.0, 0.0, 0.05, key=f"{prefix}win")
+    spec = None
+    if window_style == "hours":
+        hrs = st.sidebar.slider("Window open time (hours/day)", 0.0, 24.0, 0.0, 0.5,
+                                key=f"{prefix}wh")
+        which = st.sidebar.selectbox("Which windows",
+                                     ["All windows", "Kitchen window only"],
+                                     key=f"{prefix}ww")
+        during = st.sidebar.toggle("Open during cooking", value=True,
+                                   key=f"{prefix}wc")
+        start = 12.0
+        if not during:
+            start = st.sidebar.slider("Opens at (hour of day)", 0.0, 23.5, 12.0, 0.5,
+                                      key=f"{prefix}ws")
+        if hrs > 0:
+            st.sidebar.caption(
+                ("Windows open when the stove turns on and linger after — your open "
+                 "time is split across meals by meal length."
+                 if during else
+                 f"One block starting at {start:g}:00.")
+                + " While open, windows are at the calibrated open state (0.7).")
+        window_open = 0.0
+        spec = {"hours": hrs, "kitchen_only": which == "Kitchen window only",
+                "during_cooking": during, "start_hour": start}
+    else:
+        window_open = st.sidebar.slider("Window opening (0 = closed, 1 = wide)",
+                                        0.0, 1.0, 0.0, 0.05, key=f"{prefix}win")
     hood = st.sidebar.selectbox(
         "Range hood", ["NoHood", "25CE", "50CE", "75CE"],
         format_func=lambda h: {"NoHood": "None / recirculating", "25CE": "Standard (25%)",
@@ -160,9 +189,30 @@ def scenario_sidebar(prefix="", no2_default=7.0):
                                    key=f"{prefix}p")
     intensity = st.sidebar.slider("Burner intensity (× one burner)", 0.5, 4.0, 1.0, 0.25,
                                   key=f"{prefix}i")
-    return dict(T_out_C=T_out, wind_ms=wind, window_open=window_open, hood=hood,
-                cooking=COOKING_PATTERNS[pattern], C_out_ppb=outdoor_no2,
-                emission_scale=intensity)
+    scenario = dict(T_out_C=T_out, wind_ms=wind, window_open=window_open, hood=hood,
+                    cooking=COOKING_PATTERNS[pattern], C_out_ppb=outdoor_no2,
+                    emission_scale=intensity)
+    if spec is not None:
+        scenario["_window_spec"] = spec
+    return scenario
+
+
+def apply_window_spec(scenario, kitchen_zid):
+    """Resolve the sidebar's window spec into a concrete window_schedule for
+    ONE model (kitchen-only needs that model's kitchen zone id). Returns a new
+    kwargs dict safe to pass to transport.simulate."""
+    sc = dict(scenario)
+    spec = sc.pop("_window_spec", None)
+    if not spec or spec["hours"] <= 0:
+        return sc
+    open_value = ({kitchen_zid: transport.OPEN_FRACTION}
+                  if spec["kitchen_only"] and kitchen_zid is not None
+                  else transport.OPEN_FRACTION)
+    sc["window_schedule"] = transport.window_schedule_from_hours(
+        spec["hours"], cooking=sc.get("cooking"),
+        during_cooking=spec["during_cooking"],
+        start_hour=spec["start_hour"], open_value=open_value)
+    return sc
 
 
 arch = load_archetypes()
@@ -247,8 +297,8 @@ if panel == "Single home":
             pick = st.sidebar.selectbox("Kitchen zone (no stove source in file)", list(zopts))
             upload_kitchen = zopts[pick]
 
-    # --- shared scenario knobs ---
-    scenario = scenario_sidebar(prefix="sh_")
+    # --- shared scenario knobs (hours-based window schedule) ---
+    scenario = scenario_sidebar(prefix="sh_", window_style="hours")
 
     st.title("Single-home NO₂")
 
@@ -302,7 +352,8 @@ if panel == "Single home":
             st.stop()
         with st.spinner(f"Solving the full {apt_meta['n_floors']}-storey building "
                         f"({len(apt_model.zones)} zones)…"):
-            res = transport.simulate(apt_model, kitchen_zone=kid, **scenario)
+            res = transport.simulate(apt_model, kitchen_zone=kid,
+                                     **apply_window_spec(scenario, kid))
         zone_ids = res["zone_ids"]
         t = res["t"]
         kitchen = res["series"][:, zone_ids.index(kid)]
@@ -341,7 +392,15 @@ if panel == "Single home":
             home_title = persily_label(sel_entry)
         else:
             model = upload_model
-            res = transport.simulate(model, kitchen_zone=upload_kitchen, **scenario)
+            kzid = upload_kitchen
+            if kzid is None:            # file has its own NO2 source: that zone
+                for s in model.sources:
+                    el = model.source_elements.get(s.element)
+                    if el and el.species == "NO2" and "ov" not in el.name:
+                        kzid = s.zone
+                        break
+            res = transport.simulate(model, kitchen_zone=upload_kitchen,
+                                     **apply_window_spec(scenario, kzid))
             kname = (model.zones[upload_kitchen].name if upload_kitchen is not None
                      else kitchen_zone_name(model))
             kitchen = res["by_zone"].get(kname, np.zeros_like(res["t"]))
