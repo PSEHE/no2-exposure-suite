@@ -55,7 +55,7 @@ def _cp(profile, angle_deg):
 
 def solve_airflow(model, T_out_C, wind_ms=0.0, wind_dir=0.0,
                   window_open=0.0, T_in_C=23.0, max_iter=100, tol=1e-7,
-                  mech_extract=None):
+                  mech_extract=None, leakage_scale=1.0, mixing_scale=1.0):
     """Solve the airflow network for one set of ambient conditions.
 
     model:        parsed PrjModel
@@ -63,6 +63,12 @@ def solve_airflow(model, T_out_C, wind_ms=0.0, wind_dir=0.0,
     wind_ms:      wind speed (m/s)
     wind_dir:     wind direction (deg)
     window_open:  window opening fraction 0..1 (scales the window/door element mult)
+    leakage_scale: diagnostics knob — multiplies the flow coefficient C of
+                  envelope leaks/orifices (ambient-connected, types 23/25 only;
+                  windows/doors excluded). 1.0 = as-parsed (no-op).
+    mixing_scale: diagnostics knob — multiplies the volumetric flow of interior
+                  constant-flow mixing fans (the 1000 m³/h doorway/stair fans).
+                  1.0 = as-parsed (no-op).
 
     Returns dict with zone pressures (Pa), the zone->zone+ambient mass-flow
     matrix (kg/s), and the air-exchange rate per zone (1/h).
@@ -88,6 +94,9 @@ def solve_airflow(model, T_out_C, wind_ms=0.0, wind_dir=0.0,
             continue
         C = float(el.params[1]); n = float(el.params[2])
         mult = p.mult
+        # diagnostics: scale envelope leakage (ambient-connected leaks/orifices only)
+        if el.type_code in (23, 25) and (p.n_from == -1 or p.n_to == -1):
+            C = C * leakage_scale
         # window/door opening scales with the window_open fraction
         if el.type_code == 27:
             mult = mult * window_open
@@ -98,7 +107,7 @@ def solve_airflow(model, T_out_C, wind_ms=0.0, wind_dir=0.0,
         if (p.n_from == -1 or p.n_to == -1) and p.wind_profile in model.wind_profiles and wind_ms > 0:
             cp = _cp(model.wind_profiles[p.wind_profile], wind_dir - p.wazm)
             wind_P = WIND_MOD * (p.wPmod if p.wPmod else 1.0) * cp * Pdyn
-        paths.append((p.n_from, p.n_to, C * mult, n, p.relHt, wind_P))
+        paths.append((p.n_from, p.n_to, C * mult, n, p.relHt, wind_P, el.type_code))
 
     P = np.zeros(nz)   # zone gauge pressures (Pa), ambient = 0
 
@@ -108,10 +117,12 @@ def solve_airflow(model, T_out_C, wind_ms=0.0, wind_dir=0.0,
             return -rho_out * G * z          # ambient hydrostatic (wind added per-path)
         return P[idx[node]] - rho_zone[node] * G * z
 
+    n_iter = 0
+    last_step = float("inf")
     for _ in range(max_iter):
         F = np.zeros(nz)
         J = np.zeros((nz, nz))
-        for (a, b, C, n, z, wind_P) in paths:
+        for (a, b, C, n, z, wind_P, _tc) in paths:
             Pa = node_P_at(a, z) + (wind_P if a == -1 else 0.0)
             Pb = node_P_at(b, z) + (wind_P if b == -1 else 0.0)
             dP = Pa - Pb
@@ -135,17 +146,21 @@ def solve_airflow(model, T_out_C, wind_ms=0.0, wind_dir=0.0,
         except np.linalg.LinAlgError:
             dPv = np.linalg.lstsq(J, -F, rcond=None)[0]
         P += dPv
-        if np.max(np.abs(dPv)) < tol:
+        n_iter += 1
+        last_step = float(np.max(np.abs(dPv)))
+        if last_step < tol:
             break
 
     # Recover flows and per-zone outdoor air exchange.
     inflow_from_out = {z: 0.0 for z in zone_ids}     # kg/s of outdoor air into each zone
     path_flows = []   # (a, b, w_mass) directed mass flow a->b (kg/s) for each power-law path
-    for (a, b, C, n, z, wind_P) in paths:
+    path_types = []   # element type_code per path_flows entry (23 leak / 25 orfc / 27 door)
+    for (a, b, C, n, z, wind_P, tc) in paths:
         Pa = node_P_at(a, z) + (wind_P if a == -1 else 0.0)
         Pb = node_P_at(b, z) + (wind_P if b == -1 else 0.0)
         w, _ = _powerlaw(C, n, Pa - Pb)
         path_flows.append((a, b, w))
+        path_types.append(tc)
         if a == -1 and b != -1 and w > 0:
             inflow_from_out[b] += w
         elif b == -1 and a != -1 and w < 0:
@@ -158,6 +173,8 @@ def solve_airflow(model, T_out_C, wind_ms=0.0, wind_dir=0.0,
         el = model.elements.get(p.element)
         if el is not None and el.type_code in FAN_TYPES:
             Q = float(el.params[0]) * p.mult
+            if p.n_from != -1 and p.n_to != -1:
+                Q *= mixing_scale        # diagnostics: scale interzone mixing fans
             fans.append((p.n_from, p.n_to, Q))
 
     # Two-way density-driven exchange through OPEN large openings (windows/doors).
@@ -191,13 +208,33 @@ def solve_airflow(model, T_out_C, wind_ms=0.0, wind_dir=0.0,
     total_vol = sum(model.zones[z].volume for z in zone_ids)
     whole_home_ach = (total_out_inflow / rho_out) / total_vol * 3600 if total_vol else 0.0
 
+    # Solver health (instrumentation only — does not alter the solution):
+    # per-zone net mass imbalance of the recovered power-law flows + mech sinks.
+    net = {z: 0.0 for z in zone_ids}
+    for (a, b, w) in path_flows:
+        if b != -1:
+            net[b] += w
+        if a != -1:
+            net[a] -= w
+    for z_id, q in mech.items():
+        if z_id in idx:
+            net[z_id] -= q
+    mass_residual = max((abs(v) for v in net.values()), default=0.0)
+
     return {
         "P": {z: float(P[idx[z]]) for z in zone_ids},
         "ach": ach,
         "whole_home_ach": whole_home_ach,
         "rho_in": rho_in, "rho_out": rho_out,
         "path_flows": path_flows,   # [(a, b, w_mass kg/s)] power-law paths
+        "path_types": path_types,   # element type_code aligned with path_flows
         "fans": fans,               # [(a, b, Q_vol m3/s)] constant-flow mixing
         "mech_exhaust": [(z, mech[z]) for z in mech if z in idx],  # [(zone, kg/s)]
         "zone_ids": zone_ids,
+        "solver": {
+            "iterations": n_iter, "max_iter": max_iter,
+            "converged": last_step < tol, "last_step_Pa": last_step,
+            "mass_residual_kgps": mass_residual,
+            "mass_residual_rel": mass_residual / max(total_out_inflow, 1e-12),
+        },
     }

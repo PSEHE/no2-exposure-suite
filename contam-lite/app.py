@@ -19,7 +19,8 @@ import numpy as np
 import plotly.graph_objects as go
 import streamlit as st
 
-from core import config, constants, prj, transport, population, persily, transform, apartments
+from core import (config, constants, diagnostics as dg, prj, transport,
+                  population, persily, transform, apartments)
 
 st.set_page_config(page_title="CONTAM-Lite — NO₂ engine", layout="wide")
 
@@ -134,10 +135,35 @@ def metrics_row(ach, peak, mx1, davg):
     c4.metric("Kitchen daily avg", f"{davg:.1f} ppb")
 
 
+def scenario_sidebar(prefix="", no2_default=7.0):
+    """Shared environment/ventilation/cooking knobs -> a simulate() kwargs dict."""
+    st.sidebar.subheader("Environment")
+    T_out = st.sidebar.slider("Outdoor temperature (°C)", -15, 38, 5, key=f"{prefix}T")
+    wind = st.sidebar.slider("Wind speed (m/s)", 0.0, 12.0, 3.0, 0.5, key=f"{prefix}w")
+    outdoor_no2 = st.sidebar.slider("Outdoor NO₂ (ppb)", 0.0, 40.0, no2_default, 0.5,
+                                    key=f"{prefix}o")
+    st.sidebar.subheader("Ventilation")
+    window_open = st.sidebar.slider("Window opening (0 = closed, 1 = wide)",
+                                    0.0, 1.0, 0.0, 0.05, key=f"{prefix}win")
+    hood = st.sidebar.selectbox(
+        "Range hood", ["NoHood", "25CE", "50CE", "75CE"],
+        format_func=lambda h: {"NoHood": "None / recirculating", "25CE": "Standard (25%)",
+                               "50CE": "Good (50%)", "75CE": "High-efficiency (75%)"}[h],
+        key=f"{prefix}h")
+    st.sidebar.subheader("Cooking")
+    pattern = st.sidebar.selectbox("Meal pattern", list(COOKING_PATTERNS), index=2,
+                                   key=f"{prefix}p")
+    intensity = st.sidebar.slider("Burner intensity (× one burner)", 0.5, 4.0, 1.0, 0.25,
+                                  key=f"{prefix}i")
+    return dict(T_out_C=T_out, wind_ms=wind, window_open=window_open, hood=hood,
+                cooking=COOKING_PATTERNS[pattern], C_out_ppb=outdoor_no2,
+                emission_scale=intensity)
+
+
 arch = load_archetypes()
 st.sidebar.title("CONTAM-Lite")
 st.sidebar.caption("First-principles multizone NO₂ engine — Kashtan et al. 2024/2025.")
-panel = st.sidebar.radio("Panel", ["Single home", "Population & health"])
+panel = st.sidebar.radio("Panel", ["Single home", "Population & health", "Diagnostics"])
 st.sidebar.divider()
 
 
@@ -217,22 +243,7 @@ if panel == "Single home":
             upload_kitchen = zopts[pick]
 
     # --- shared scenario knobs ---
-    st.sidebar.subheader("Environment")
-    T_out = st.sidebar.slider("Outdoor temperature (°C)", -15, 38, 5)
-    wind = st.sidebar.slider("Wind speed (m/s)", 0.0, 12.0, 3.0, 0.5)
-    outdoor_no2 = st.sidebar.slider("Outdoor NO₂ (ppb)", 0.0, 40.0, 7.0, 0.5)
-    st.sidebar.subheader("Ventilation")
-    window_open = st.sidebar.slider("Window opening (0 = closed, 1 = wide)", 0.0, 1.0, 0.0, 0.05)
-    hood = st.sidebar.selectbox(
-        "Range hood", ["NoHood", "25CE", "50CE", "75CE"],
-        format_func=lambda h: {"NoHood": "None / recirculating", "25CE": "Standard (25%)",
-                               "50CE": "Good (50%)", "75CE": "High-efficiency (75%)"}[h])
-    st.sidebar.subheader("Cooking")
-    pattern = st.sidebar.selectbox("Meal pattern", list(COOKING_PATTERNS), index=2)
-    intensity = st.sidebar.slider("Burner intensity (× one burner)", 0.5, 4.0, 1.0, 0.25)
-    scenario = dict(T_out_C=T_out, wind_ms=wind, window_open=window_open, hood=hood,
-                    cooking=COOKING_PATTERNS[pattern], C_out_ppb=outdoor_no2,
-                    emission_scale=intensity)
+    scenario = scenario_sidebar(prefix="sh_")
 
     st.title("Single-home NO₂")
 
@@ -363,7 +374,7 @@ if panel == "Single home":
 
 
 # ======================= POPULATION & HEALTH =======================
-else:
+elif panel == "Population & health":
     st.sidebar.subheader("Population")
     gas_pct = st.sidebar.slider("Homes cooking with gas/propane (%)", 0, 100, 38)
     hood_adopt = st.sidebar.slider("Homes with an effective vented hood (%)", 0, 100, 22)
@@ -407,3 +418,378 @@ else:
         "the papers' central national estimates (≈50k asthma cases, ≈19k deaths at 38% prevalence) and "
         "scaled linearly by modeled exposure × prevalence. — "
         "Drafted by Claude with prompts engineered by Yannai Kashtan")
+
+
+# ============================ DIAGNOSTICS ============================
+else:
+    # ---- home picker: 24 paper archetypes first, then the NIST library ----
+    papers = dg.paper_homes()
+    paper_opts = sorted(papers, key=lambda h: (papers[h]["type"],
+                                               papers[h]["floor_area_ft2"]))
+    nist = sorted(persily_homes(), key=lambda h: (h["type"], h["floor_area_ft2"]))
+    options = [("paper", h) for h in paper_opts] + [("nist", h["id"]) for h in nist]
+    nist_by_id = {h["id"]: h for h in nist}
+
+    def _dg_label(opt):
+        kind, hid = opt
+        if kind == "paper":
+            a = papers[hid]
+            return f"{hid} · paper · {a['floor_area_ft2']:,} ft²"
+        h = nist_by_id[hid]
+        return f"{hid} · NIST · {h['floor_area_ft2']:,} ft²"
+
+    default_i = options.index(("paper", "DH-29"))
+    kind, home_id = st.sidebar.selectbox("Home", options, index=default_i,
+                                         format_func=_dg_label, key="dg_home")
+    if kind == "paper":
+        model = load_model(home_id)
+        arch = papers[home_id]
+        kz_sim = None                       # paper homes carry their own sources
+    else:
+        model = load_persily_model(nist_by_id[home_id]["rel_path"])
+        arch = None
+        kz_sim = transform.kitchen_zone_id(model)
+    roles = dg.zone_roles(model, arch)
+
+    scenario = scenario_sidebar(prefix="dg_", no2_default=0.0)
+    st.sidebar.caption("Outdoor NO₂ defaults to 0 here to isolate stove physics "
+                       "(the library convention).")
+    scen_key = json.dumps(scenario, sort_keys=True)   # hashable cache key
+
+    # ---- cached computation wrappers (model objects aren't hashable) ----
+    @st.cache_data(show_spinner=False)
+    def c_sweep(home, skey, knob, _m, _r, _sc, _kz):
+        return dg.sweep(_m, _r, _sc, knob, kitchen_zone=_kz)
+
+    @st.cache_data(show_spinner=False)
+    def c_tornado(home, skey, _m, _r, _sc, _kz):
+        df, base = dg.tornado(_m, _r, _sc, kitchen_zone=_kz)
+        return df, base
+
+    @st.cache_data(show_spinner=False)
+    def c_case(home, skey, _m, _r, _sc, _kz):
+        return dg.run_case(_m, _r, _sc, kitchen_zone=_kz,
+                           internals=True, include_res=True)
+
+    @st.cache_data(show_spinner=False)
+    def c_box(home, skey, _m, _r, _sc, _kz):
+        return dg.box_model_check(_m, _r, _sc, kitchen_zone=_kz)
+
+    @st.cache_data(show_spinner=False)
+    def c_scaling(home, _m):
+        return dg.scaling_laws(_m)
+
+    @st.cache_data(show_spinner=False)
+    def c_convergence(home, _m):
+        return dg.convergence_scan(_m)
+
+    @st.cache_data(show_spinner=False)
+    def c_axis(house, axis, metric, window_state):
+        return dg.axis_response(house, axis, metric,
+                                overrides={"window": window_state}
+                                if axis != "window" else None)
+
+    @st.cache_data(show_spinner=True)
+    def c_scatter(house, n, seed):
+        return dg.scatter_sample(house, n=n, seed=seed)
+
+    st.title("Engine diagnostics")
+    st.caption(f"{home_id} · {len(model.zones)} zones · kitchen = "
+               f"{model.zones[roles['kitchen']].name}"
+               + (f" · bedroom = {model.zones[roles['bedroom']].name}"
+                  if roles["bedroom"] else "")
+               + " · all sweeps/checks run the live engine at the sidebar conditions.")
+
+    tab_sw, tab_ck, tab_lib, tab_af = st.tabs(
+        ["Sensitivity sweeps", "Physics self-checks", "vs. CONTAM library",
+         "Airflow internals"])
+
+    # ----------------------------- A. sweeps -----------------------------
+    with tab_sw:
+        knob = st.selectbox("Sweep knob", list(dg.SWEEPS),
+                            format_func=lambda k: dg.SWEEPS[k][0])
+        with st.spinner("Sweeping…"):
+            df = c_sweep(home_id, scen_key, knob, model, roles, scenario, kz_sim)
+        bad = df[~df["solver_converged"]]
+
+        CONC = [("kitchen_peak", "kitchen peak"), ("kitchen_max1h", "kitchen max 1-hr"),
+                ("kitchen_dayavg", "kitchen day-avg"), ("bedroom_dayavg", "bedroom day-avg"),
+                ("homeavg_dayavg", "home-avg day-avg")]
+        logy = st.checkbox("log concentration axis", value=False)
+        fig = go.Figure()
+        for col, name in CONC:
+            fig.add_trace(go.Scatter(x=df[knob], y=df[col], mode="lines+markers", name=name))
+        fig.update_layout(xaxis_title=dg.SWEEPS[knob][0], yaxis_title="NO₂ (ppb)",
+                          height=380, margin=dict(l=10, r=10, t=30, b=10),
+                          yaxis_type="log" if logy else "linear",
+                          legend=dict(orientation="h", yanchor="bottom", y=1.02))
+        st.plotly_chart(fig, use_container_width=True)
+
+        fig2 = go.Figure()
+        fig2.add_trace(go.Scatter(x=df[knob], y=df["whole_home_ach"],
+                                  mode="lines+markers", name="whole-home ACH (/h)"))
+        fig2.add_trace(go.Scatter(x=df[knob], y=df["kitchen_outdoor_ach"],
+                                  mode="lines+markers", name="kitchen outdoor ACH (/h)"))
+        fig2.add_trace(go.Scatter(x=df[knob], y=df["kitchen_exchange_m3h"],
+                                  mode="lines+markers", name="kitchen↔rest exchange (m³/h)",
+                                  yaxis="y2", line=dict(dash="dot")))
+        if len(bad):
+            fig2.add_trace(go.Scatter(x=bad[knob], y=bad["whole_home_ach"], mode="markers",
+                                      name="airflow NOT converged",
+                                      marker=dict(symbol="x", size=11, color="#d6453d")))
+        fig2.update_layout(xaxis_title=dg.SWEEPS[knob][0],
+                           yaxis=dict(title="air exchange (/h)"),
+                           yaxis2=dict(title="exchange (m³/h)", overlaying="y", side="right"),
+                           height=340, margin=dict(l=10, r=10, t=30, b=10),
+                           legend=dict(orientation="h", yanchor="bottom", y=1.02))
+        st.plotly_chart(fig2, use_container_width=True)
+        if len(bad):
+            st.warning(f"{len(bad)}/{len(df)} sweep points: the airflow Newton solve hit "
+                       "the iteration cap without converging (see Self-checks → solver "
+                       "health). Concentrations at those points inherit the bias.")
+
+        st.subheader("Concentration vs. air exchange (parametric)")
+        fig3 = go.Figure()
+        fig3.add_trace(go.Scatter(
+            x=df["whole_home_ach"], y=df["kitchen_dayavg"], mode="markers+lines",
+            name="kitchen day-avg", text=[f"{knob}={v:g}" for v in df[knob]],
+            marker=dict(size=8, color=df[knob], colorscale="Viridis", showscale=True,
+                        colorbar=dict(title=knob))))
+        fig3.add_trace(go.Scatter(x=df["whole_home_ach"], y=df["bedroom_dayavg"],
+                                  mode="markers+lines", name="bedroom day-avg",
+                                  line=dict(dash="dot")))
+        fig3.update_layout(xaxis_title="whole-home ACH (/h)", yaxis_title="NO₂ (ppb)",
+                           height=340, margin=dict(l=10, r=10, t=30, b=10),
+                           legend=dict(orientation="h", yanchor="bottom", y=1.02))
+        st.plotly_chart(fig3, use_container_width=True)
+        st.caption("Air exchange is EMERGENT (leakage + stack + wind + windows), so this "
+                   "traces C(ACH) as the sweep knob moves it — different knobs trace "
+                   "different curves. Kitchen↔rest exchange = volumetric inflow to the "
+                   "kitchen from other rooms (doorway fans + interior leaks), fans-off regime.")
+
+        st.subheader("Tornado — one step on every knob")
+        with st.spinner("Perturbing each knob…"):
+            tdf, base_m = c_tornado(home_id, scen_key, model, roles, scenario, kz_sim)
+        figt = go.Figure()
+        for col, color in (("kitchen_dayavg", "#e8743b"), ("bedroom_dayavg", "#4063d8"),
+                           ("whole_home_ach", "#2f9e57")):
+            figt.add_trace(go.Bar(y=tdf["perturbation"], x=tdf[col], orientation="h",
+                                  name=col.replace("_", " "), marker_color=color))
+        figt.update_layout(xaxis_title="% change from base", barmode="group", height=380,
+                           margin=dict(l=10, r=10, t=30, b=10),
+                           legend=dict(orientation="h", yanchor="bottom", y=1.02))
+        st.plotly_chart(figt, use_container_width=True)
+        st.caption(f"Base point: kitchen day-avg {base_m['kitchen_dayavg']:.1f} ppb · "
+                   f"bedroom {base_m['bedroom_dayavg']:.1f} ppb · "
+                   f"ACH {base_m['whole_home_ach']:.2f}/h · "
+                   f"kitchen↔rest {base_m['kitchen_exchange_m3h']:,.0f} m³/h.")
+
+    # -------------------------- B. self-checks --------------------------
+    with tab_ck:
+        with st.spinner("Running base case with internals…"):
+            case = c_case(home_id, scen_key, model, roles, scenario, kz_sim)
+        res = case["res"]
+
+        st.subheader("Mass-balance closure (24 h)")
+        mb = dg.mass_balance(res)
+        ok = abs(mb["residual_pct"]) < 1e-6
+        c1, c2, c3, c4, c5 = st.columns(5)
+        c1.metric("Emitted", f"{mb['emitted_g']:.3f} g")
+        c2.metric("Decayed", f"{mb['decayed_g']:.3f} g")
+        c3.metric("Exfiltrated", f"{mb['exfiltrated_g']:.3f} g")
+        c4.metric("Δ storage", f"{mb['storage_g']:.4f} g")
+        c5.metric("Residual", f"{mb['residual_pct']:.1e} %",
+                  delta="closes" if ok else "FAILS", delta_color="normal" if ok else "inverse")
+        st.caption("Exact bookkeeping via the solver's own matrix-exponential step "
+                   "integrals — residual at float precision means the transport "
+                   "integration is internally exact (this is not a discretized estimate).")
+
+        st.subheader("Post-dinner decay tail vs. system modes")
+        ddf, refs = dg.decay_fit(res, roles)
+        cA, cB = st.columns([1, 1])
+        with cA:
+            st.dataframe(ddf.round(4), use_container_width=True, hide_index=True)
+        with cB:
+            st.metric("Slowest system mode", f"{refs['slowest_mode_per_h']:.3f} /h")
+            st.metric("Naive whole-home ACH + decay", f"{refs['ach_plus_decay_per_h']:.3f} /h")
+        st.caption("Fitted on ln(C − overnight floor), hours 20–24. All rooms should relax "
+                   "at the slowest eigenvalue of the fans-off transport matrix — the same "
+                   "analysis as a field tracer-decay experiment. The naive ACH+k rate "
+                   "differs legitimately: the home is not one well-mixed zone.")
+
+        st.subheader("Well-mixed (box-model) limit")
+        bm = c_box(home_id, scen_key, model, roles, scenario, kz_sim)
+        okb = abs(bm["ratio_dayavg"] - 1) < 0.05
+        cb1, cb2 = st.columns([2, 1])
+        with cb1:
+            figb = go.Figure()
+            figb.add_trace(go.Scatter(x=bm["t"], y=bm["engine"], mode="lines",
+                                      name=f"engine @ mixing×{bm['mixing']:g}"))
+            figb.add_trace(go.Scatter(x=bm["t"], y=bm["box"], mode="lines",
+                                      name="analytic single box", line=dict(dash="dash")))
+            figb.update_layout(xaxis_title="hour", yaxis_title="NO₂ (ppb)", height=300,
+                               margin=dict(l=10, r=10, t=30, b=10),
+                               legend=dict(orientation="h", yanchor="bottom", y=1.02))
+            st.plotly_chart(figb, use_container_width=True)
+        with cb2:
+            st.metric("engine / box (day-avg)", f"{bm['ratio_dayavg']:.4f}",
+                      delta="within 5%" if okb else "outside 5%",
+                      delta_color="normal" if okb else "inverse")
+            st.caption(f"{bm['n_component']}/{bm['n_zones']} zones fan-connected "
+                       f"({bm['volume_fraction']:.0%} of volume). Outdoor NO₂ forced to 0 "
+                       "(a box can't represent the indirect basement/attic pathway).")
+
+        st.subheader("Power-law scaling")
+        sl = c_scaling(home_id, model)
+        cs1, cs2 = st.columns(2)
+        with cs1:
+            figs = go.Figure()
+            figs.add_trace(go.Scatter(x=sl["dT"], y=sl["ach_dT"], mode="markers", name="ACH"))
+            figs.add_trace(go.Scatter(
+                x=sl["dT"], y=np.exp(np.polyval(np.polyfit(np.log(sl["dT"]),
+                                                           np.log(sl["ach_dT"]), 1),
+                                                np.log(sl["dT"]))),
+                mode="lines", name=f"fit: slope {sl['slope_dT']:.2f}"))
+            figs.update_layout(xaxis_type="log", yaxis_type="log", height=300,
+                               xaxis_title="ΔT (K), wind 0", yaxis_title="ACH (/h)",
+                               margin=dict(l=10, r=10, t=30, b=10),
+                               legend=dict(orientation="h", yanchor="bottom", y=1.02))
+            st.plotly_chart(figs, use_container_width=True)
+        with cs2:
+            figw = go.Figure()
+            figw.add_trace(go.Scatter(x=sl["v"], y=sl["ach_v"], mode="markers", name="ACH"))
+            figw.add_trace(go.Scatter(
+                x=sl["v"], y=np.exp(np.polyval(np.polyfit(np.log(sl["v"]),
+                                                          np.log(sl["ach_v"]), 1),
+                                               np.log(sl["v"]))),
+                mode="lines", name=f"fit: slope {sl['slope_v']:.2f}"))
+            figw.update_layout(xaxis_type="log", yaxis_type="log", height=300,
+                               xaxis_title="wind (m/s), ΔT 0", yaxis_title="ACH (/h)",
+                               margin=dict(l=10, r=10, t=30, b=10),
+                               legend=dict(orientation="h", yanchor="bottom", y=1.02))
+            st.plotly_chart(figw, use_container_width=True)
+        st.caption(f"Leak exponents n ∈ [{sl['n_min']:.2f}, {sl['n_max']:.2f}] "
+                   f"(C-weighted mean {sl['n_mean']:.2f}). Stack slope should fall in that "
+                   f"range (got {sl['slope_dT']:.2f}); wind slope ≈ 2n (got {sl['slope_v']:.2f}). "
+                   "Computed with fully-converged solves — physics check, not solver check.")
+
+        st.subheader("Airflow solver health")
+        sv = case["afr"]["solver"]
+        ch1, ch2, ch3 = st.columns(3)
+        ch1.metric("Iterations (base case)", f"{sv['iterations']}/{sv['max_iter']}",
+                   delta="converged" if sv["converged"] else "NOT converged",
+                   delta_color="normal" if sv["converged"] else "inverse")
+        ch2.metric("Last Newton step", f"{sv['last_step_Pa']:.1e} Pa")
+        ch3.metric("Mass residual (rel.)", f"{sv['mass_residual_rel']:.1e}")
+        with st.spinner("Scanning the temp × wind × window grid…"):
+            cs = c_convergence(home_id, model)
+        flagged = cs[cs["ratio"] < 0.98]
+        if len(flagged):
+            st.error(f"{len(flagged)}/{len(cs)} grid cells return a NON-converged airflow "
+                     "solution at the production iteration cap (undamped Newton, "
+                     "max_iter=100). ACH there is biased low → concentrations biased high.")
+            st.dataframe(flagged.round(3), use_container_width=True, hide_index=True)
+        else:
+            st.success(f"All {len(cs)} temp × wind × window grid cells converge at the "
+                       "production solver settings for this home.")
+        with st.expander("Full convergence grid"):
+            st.dataframe(cs.round(3), use_container_width=True, hide_index=True)
+
+    # ------------------------ C. vs. CONTAM library ------------------------
+    with tab_lib:
+        if not dg.have_library_truth():
+            st.warning("Library ground truth needs the original data folders "
+                       "(Occupancy schedules + house inputs) — available on this machine "
+                       "only if the CONTAM_SCALEUP project is present.")
+        elif kind != "paper":
+            st.info("Pick one of the 24 paper homes in the sidebar — the 86,400-scenario "
+                    "library only covers those.")
+        else:
+            cl1, cl2, cl3 = st.columns(3)
+            axis = cl1.selectbox("Vary axis", list(dg.AXES))
+            metric = cl2.selectbox("Metric", ["dayavg", "hravg", "eighthravg", "peak"])
+            wstate = cl3.selectbox("Windows held at", ["closed", "moderate", "open"],
+                                   disabled=(axis == "window"))
+            with st.spinner("Engine runs along the axis…"):
+                ar = c_axis(home_id, axis, metric, wstate)
+            gm = dg.gm_ratio(ar["engine"], ar["library"])
+            figl = go.Figure()
+            figl.add_trace(go.Scatter(x=ar["level"], y=ar["engine"],
+                                      mode="lines+markers", name="engine"))
+            figl.add_trace(go.Scatter(x=ar["level"], y=ar["library"],
+                                      mode="lines+markers", name="library (exact CONTAM)"))
+            figl.update_layout(xaxis_title=axis, yaxis_title=f"{metric} (ppb, occupancy-weighted)",
+                               height=360, margin=dict(l=10, r=10, t=30, b=10),
+                               legend=dict(orientation="h", yanchor="bottom", y=1.02))
+            st.plotly_chart(figl, use_container_width=True)
+            st.caption(f"Other axes at reference (NoHood · med use · {wstate} windows · "
+                       f"COOL · BREEZE · median occupancy). GM engine/library ratio on this "
+                       f"axis: {gm:.2f}. Absolute offsets reflect the documented per-type "
+                       "bias; the SHAPE mismatch along an axis is the physics signal.")
+
+            with st.expander("Scatter over a random scenario sample"):
+                n = st.slider("Sample size", 30, 300, 100, 10)
+                if st.button("Run sample"):
+                    sc_df = c_scatter(home_id, n, 0)
+                    x = sc_df[f"library_{metric}"]; y = sc_df[f"engine_{metric}"]
+                    gm2 = dg.gm_ratio(y, x)
+                    figsc = go.Figure()
+                    figsc.add_trace(go.Scatter(x=x, y=y, mode="markers",
+                                               marker=dict(size=6, opacity=0.65,
+                                                           color=sc_df["window"].map(
+                                                               {"closed": "#4063d8",
+                                                                "moderate": "#2f9e57",
+                                                                "open": "#e8743b"})),
+                                               text=[f"{r.hood}/{r.use}/{r.window}/{r.temp}/"
+                                                     f"{r.wind}/{r.oc}"
+                                                     for r in sc_df.itertuples()],
+                                               name="scenarios"))
+                    lim = [max(0.05, min(x.min(), y.min()) * 0.8),
+                           max(x.max(), y.max()) * 1.2]
+                    figsc.add_trace(go.Scatter(x=lim, y=lim, mode="lines", name="1:1",
+                                               line=dict(dash="dash", color="#888")))
+                    figsc.update_layout(xaxis_type="log", yaxis_type="log", height=430,
+                                        xaxis_title=f"library {metric} (ppb)",
+                                        yaxis_title=f"engine {metric} (ppb)",
+                                        margin=dict(l=10, r=10, t=30, b=10))
+                    st.plotly_chart(figsc, use_container_width=True)
+                    st.caption(f"n={len(sc_df)} · GM engine/library = {gm2:.2f} · colors = "
+                               "window state (blue closed, green moderate, orange open).")
+
+    # ------------------------- D. airflow internals -------------------------
+    with tab_af:
+        case = c_case(home_id, scen_key, model, roles, scenario, kz_sim)
+        afr, res = case["afr"], case["res"]
+        kb = case["boundary"]
+        cm1, cm2, cm3 = st.columns(3)
+        cm1.metric("Kitchen ↔ rest of home", f"{kb['interzone_m3h']:,.0f} m³/h")
+        cm2.metric("Kitchen ↔ outdoors", f"{kb['outdoor_m3h']:,.1f} m³/h")
+        cm3.metric("Kitchen turnover", f"{kb['turnover_ach']:.1f} /h")
+
+        st.subheader("Kitchen boundary flows")
+        rows = sorted(kb["rows"], key=lambda r: -(r["q_in"] + r["q_out"]))
+        figk = go.Figure()
+        labels = [f"{r['counterpart']} ({r['kind']})" for r in rows]
+        figk.add_trace(go.Bar(y=labels, x=[r["q_in"] for r in rows], orientation="h",
+                              name="into kitchen", marker_color="#4063d8"))
+        figk.add_trace(go.Bar(y=labels, x=[-r["q_out"] for r in rows], orientation="h",
+                              name="out of kitchen", marker_color="#e8743b"))
+        figk.update_layout(barmode="relative", xaxis_title="m³/h",
+                           height=max(260, 34 * len(rows)),
+                           margin=dict(l=10, r=10, t=30, b=10),
+                           legend=dict(orientation="h", yanchor="bottom", y=1.02))
+        st.plotly_chart(figk, use_container_width=True)
+        st.caption("Fans-off (overnight) regime at the sidebar conditions. Doorway mixing "
+                   "fans exchange equal volumes both ways; power-law paths are directional.")
+
+        st.subheader("Per-zone state")
+        zi = {z: i for i, z in enumerate(res["zone_ids"])}
+        ztab = [{"Zone": model.zones[z].name, "Volume (m³)": round(model.zones[z].volume, 1),
+                 "Pressure (Pa)": round(afr["P"][z], 3),
+                 "Outdoor ACH (/h)": round(afr["ach"][z], 3),
+                 "Day-avg NO₂ (ppb)": round(float(np.mean(res["series"][:, zi[z]])), 2)}
+                for z in res["zone_ids"]]
+        st.dataframe(ztab, use_container_width=True, hide_index=True)
+        st.caption("Sanity anchors: zone pressures within a few Pa of ambient; stack makes "
+                   "lower zones slightly negative and upper zones positive on cold days. — "
+                   "Drafted by Claude with prompts engineered by Yannai Kashtan")

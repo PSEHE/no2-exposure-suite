@@ -62,7 +62,8 @@ def _no2_sources(model, kitchen_zone=None):
 def simulate(model, *, T_out_C=10.0, wind_ms=2.0, wind_dir=0.0, window_open=0.0,
              hood="NoHood", cooking=None, C_out_ppb=0.0, T_in_C=23.0,
              emission_scale=1.0, kitchen_zone=None, hours=24, dt_min=10,
-             shower_schedule=None):
+             shower_schedule=None, leakage_scale=1.0, mixing_scale=1.0,
+             return_internals=False):
     """Run a day of NO2 transport. Returns time series + per-zone summary.
 
     Mechanical exhaust fans run on SCHEDULES, so the airflow network changes over
@@ -70,7 +71,13 @@ def simulate(model, *, T_out_C=10.0, wind_ms=2.0, wind_dir=0.0, window_open=0.0,
     solve the airflow once per distinct fan regime and integrate transport
     piecewise (an exact matrix-exponential step per regime). Homes with no
     mechanical exhaust (all CS-11 + the modified 24) collapse to a single regime
-    — identical to the steady-airflow behavior."""
+    — identical to the steady-airflow behavior.
+
+    Diagnostics knobs (all no-op at defaults): leakage_scale / mixing_scale pass
+    through to the airflow solver; return_internals attaches exact per-step
+    integrals (∫C dt via the same matrix-exponential machinery), per-step
+    outdoor-exchange and emission vectors, and the overnight system matrix —
+    enough to audit mass balance and modal time constants externally."""
     rho_ref = af.RHO_REF
     base_mech = getattr(model, "mech_extract", {}) or {}
     # Split exhaust into the kitchen fan (runs while cooking) and bath/other fans
@@ -106,7 +113,8 @@ def simulate(model, *, T_out_C=10.0, wind_ms=2.0, wind_dir=0.0, window_open=0.0,
                 me.update(bath_mech)
             afr_cache[key] = af.solve_airflow(
                 model, T_out_C=T_out_C, wind_ms=wind_ms, wind_dir=wind_dir,
-                window_open=window_open, T_in_C=T_in_C, mech_extract=me)
+                window_open=window_open, T_in_C=T_in_C, mech_extract=me,
+                leakage_scale=leakage_scale, mixing_scale=mixing_scale)
         return afr_cache[key]
 
     zone_ids = airflow_for(False, False)["zone_ids"]
@@ -142,13 +150,13 @@ def simulate(model, *, T_out_C=10.0, wind_ms=2.0, wind_dir=0.0, window_open=0.0,
         outflow = Qin.sum(axis=0) + Qout_out
         np.fill_diagonal(A, 0.0)
         A[np.diag_indices(nz)] = -(outflow / V + k)
-        return A, Qout_in
+        return A, Qout_in, Qout_out
 
     cooktop, oven = _no2_sources(model, kitchen_zone=kitchen_zone)
     hood_mult = HOOD_MULT.get(hood, 1.0)
 
-    def b_vector(Qout_in, ct, ov):
-        g = np.zeros(nz)  # kg/s
+    def g_vec(ct, ov):
+        g = np.zeros(nz)  # kg/s per zone
         if ct:
             for z, r in cooktop.items():
                 if z in idx:
@@ -157,24 +165,34 @@ def simulate(model, *, T_out_C=10.0, wind_ms=2.0, wind_dir=0.0, window_open=0.0,
             for z, r in oven.items():
                 if z in idx:
                     g[idx[z]] += r * hood_mult * emission_scale
-        return (Qout_in * C_out_ppb + g / PPB_TO_KGM3) / V
+        return g
+
+    def b_vector(Qout_in, ct, ov):
+        return (Qout_in * C_out_ppb + g_vec(ct, ov) / PPB_TO_KGM3) / V
 
     dt = dt_min * 60.0
     nsteps = int(round(hours * 3600 / dt))
 
-    reg_cache = {}     # (kf, bf) -> (A, Phi, Qout_in, ach)
+    reg_cache = {}     # (kf, bf) -> (A, Phi, Qout_in, Qout_out, ach)
     def regime(kf, bf):
         if (kf, bf) not in reg_cache:
             afr = airflow_for(kf, bf)
-            A, Qoi = build(afr)
-            reg_cache[(kf, bf)] = (A, expm(A * dt), Qoi, afr["whole_home_ach"])
+            A, Qoi, Qoo = build(afr)
+            reg_cache[(kf, bf)] = (A, expm(A * dt), Qoi, Qoo, afr["whole_home_ach"])
         return reg_cache[(kf, bf)]
+
+    mint_cache = {}    # (kf, bf) -> A^-1 (Phi - I), for exact per-step ∫C dt
+    def step_integral_op(kf, bf):
+        if (kf, bf) not in mint_cache:
+            A, Phi, _, _, _ = regime(kf, bf)
+            mint_cache[(kf, bf)] = np.linalg.solve(A, Phi - np.eye(nz))
+        return mint_cache[(kf, bf)]
 
     state_cache = {}   # (kf, bf, ct, ov) -> steady-state C
     def steady(kf, bf, ct, ov):
         key = (kf, bf, ct, ov)
         if key not in state_cache:
-            A, _, Qoi, _ = regime(kf, bf)
+            A, _, Qoi, _, _ = regime(kf, bf)
             b = b_vector(Qoi, ct, ov)
             try:
                 Css = np.linalg.solve(A, -b)
@@ -185,15 +203,21 @@ def simulate(model, *, T_out_C=10.0, wind_ms=2.0, wind_dir=0.0, window_open=0.0,
 
     C = np.full(nz, C_out_ppb)    # start near outdoor
     times, series, ach_t = [], [], []
+    cint_t, g_t, qoi_t, qoo_t = [], [], [], []       # internals (diagnostics)
     for step in range(nsteps + 1):
         t_h = step * dt / 3600.0
         ct, ov = cooking_active(t_h)
         kf = bool(kit_mech) and (ct or ov)            # kitchen fan runs while cooking
         bf = bool(bath_mech) and shower_active(t_h)   # bath fans run during showers
-        _, Phi, _, ach = regime(kf, bf)
+        _, Phi, Qoi, Qoo, ach = regime(kf, bf)
         times.append(t_h); series.append(C.copy()); ach_t.append(ach)
-        C = steady(kf, bf, ct, ov)
-        C = C + Phi @ (series[-1] - C)
+        Css = steady(kf, bf, ct, ov)
+        if return_internals and step < nsteps:
+            # exact ∫C dt over the step: Css·dt + A⁻¹(Φ−I)(C0 − Css)
+            cint_t.append(Css * dt + step_integral_op(kf, bf) @ (series[-1] - Css))
+            g_t.append(g_vec(ct, ov) / PPB_TO_KGM3)   # emission, ppb·m³/s per zone
+            qoi_t.append(Qoi); qoo_t.append(Qoo)      # outdoor exchange, m³/s per zone
+        C = Css + Phi @ (series[-1] - Css)
 
     series = np.array(series)     # (nsteps+1, nz) ppb
     names = {z: model.zones[z].name for z in zone_ids}
@@ -207,8 +231,19 @@ def simulate(model, *, T_out_C=10.0, wind_ms=2.0, wind_dir=0.0, window_open=0.0,
         }
         for z in zone_ids
     }
-    return {
+    out = {
         "t": np.array(times), "series": series, "by_zone": by_zone,
         "summary": summary, "zone_ids": zone_ids, "names": names,
         "whole_home_ach": float(np.mean(ach_t[:n24])),   # day-average air exchange
     }
+    if return_internals:
+        A_night, _, _, _, _ = regime(False, False)       # fans-off system matrix
+        out["internals"] = {
+            "Cint": np.array(cint_t),      # (nsteps, nz) ppb·s — exact ∫C dt per step
+            "g": np.array(g_t),            # (nsteps, nz) ppb·m³/s — emission rate
+            "Qout_in": np.array(qoi_t),    # (nsteps, nz) m³/s — outdoor → zone
+            "Qout_out": np.array(qoo_t),   # (nsteps, nz) m³/s — zone → outdoor
+            "A_overnight": A_night,        # (nz, nz) 1/s — fans-off transport matrix
+            "V": V, "k": k, "dt_s": dt, "C_out_ppb": C_out_ppb,
+        }
+    return out
