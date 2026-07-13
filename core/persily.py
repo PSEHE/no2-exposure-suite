@@ -48,6 +48,55 @@ def load_manifest():
         return json.load(f)["homes"]
 
 
+def raw_twin_path(house_id):
+    """Vendored raw CS-11 twin of a paper-modified home (same NIST id)."""
+    sub = {"AH": "AH", "DH": "DH", "MH": "MH", "APT": "APTS"}.get(_home_type(house_id))
+    if sub is None:
+        return None
+    p = config.PERSILY_DIR / "cs11" / sub / f"{house_id}.prj"
+    return p if p.exists() else None
+
+
+def twin_doorway_pairs(house_id, modified_model):
+    """Doorway zone-pairs recovered from a home's raw NIST twin, mapped onto
+    the modified model's zone ids by (normalized name, level).
+
+    The Sci. Adv. macro replaced interior door paths with mixing fans; in the
+    files where the fan step failed (AH-21, DH-7, APT-4) the doorway geometry
+    survives only in the raw twin. Ambiguous name+level matches are skipped.
+    Returns (pairs, n_skipped)."""
+    p = raw_twin_path(house_id)
+    if p is None:
+        return set(), 0
+    raw = prj.parse_prj(str(p))
+    raw_pairs = transform._interior_doorways(raw)
+
+    def zkey(m, zid):
+        z = m.zones[zid]
+        return (transform._norm(z.name), z.level)
+
+    mod_by_key = {}
+    for zid, z in modified_model.zones.items():
+        mod_by_key.setdefault((transform._norm(z.name), z.level), []).append(zid)
+    mapped, skipped = set(), 0
+    for a, b in raw_pairs:
+        ca = mod_by_key.get(zkey(raw, a), [])
+        cb = mod_by_key.get(zkey(raw, b), [])
+        if len(ca) == 1 and len(cb) == 1 and ca[0] != cb[0]:
+            mapped.add(tuple(sorted((ca[0], cb[0]))))
+        else:
+            skipped += 1
+    return mapped, skipped
+
+
+def load_paper_home(house_id):
+    """Parse a paper-modified home and apply the uniform-mixing policy
+    (phantom cleanup + doorway top-up, twin-recovered where needed)."""
+    m = prj.parse_prj(config.prj_path(house_id))
+    extra, _ = twin_doorway_pairs(house_id, m)
+    return transform.apply_modifications(m, extra_doorways=extra)
+
+
 def list_homes(simulatable_only=True, single_dwelling_only=True):
     homes = load_manifest()
     if single_dwelling_only:

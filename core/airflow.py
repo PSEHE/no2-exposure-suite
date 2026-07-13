@@ -13,6 +13,8 @@ from __future__ import annotations
 
 import numpy as np
 
+from . import transform as _tf     # is_living() for the living-space ACH metric
+
 G = 9.8055
 RHO_REF = 1.2041      # reference air density used by the PRJ flow coefficients
 P_ATM = 101325.0
@@ -24,6 +26,10 @@ FAN_TYPES = {31, 29}            # fan_cvf / constant volume flow
 DOOR_TYPES = {27}               # dor_door — also gets two-way density exchange
 DOOR_CD = 0.35                  # discharge coef for two-way opening flow (calibrated)
 WIND_MOD = 0.3                  # global wind-pressure scale (calibrated)
+# Standard interzone doorway mixing (m³/s each way per doorway = 2000 m³/h).
+# Every home gets THIS value on every doorway pair regardless of what its .prj
+# encodes (per-home Sci-Adv variations are normalized away at solve time).
+STD_DOORWAY_M3S = 2 * 0.277778
 
 
 def air_density(T_kelvin, P=P_ATM):
@@ -62,7 +68,10 @@ def solve_airflow(model, T_out_C, wind_ms=0.0, wind_dir=0.0,
     T_out_C:      outdoor temperature (C)
     wind_ms:      wind speed (m/s)
     wind_dir:     wind direction (deg)
-    window_open:  window opening fraction 0..1 (scales the window/door element mult)
+    window_open:  window opening fraction 0..1 (scales the window/door element
+                  mult), applied to every window; OR a {zone_id: fraction} dict
+                  for per-room control (zones not listed are closed; interior
+                  doors take the more-open side)
     leakage_scale: diagnostics knob — multiplies the flow coefficient C of
                   envelope leaks/orifices (ambient-connected, types 23/25 only;
                   windows/doors excluded). 1.0 = as-parsed (no-op).
@@ -86,6 +95,17 @@ def solve_airflow(model, T_out_C, wind_ms=0.0, wind_dir=0.0,
     rho_zone = {z: rho_in for z in zone_ids}          # all zones at indoor temp
     Pdyn = 0.5 * rho_out * wind_ms ** 2
 
+    def _wo(path):
+        """Opening fraction for a window/door path (scalar or per-room dict)."""
+        if not isinstance(window_open, dict):
+            return float(window_open)
+        if path.n_from == -1:
+            return float(window_open.get(path.n_to, 0.0))
+        if path.n_to == -1:
+            return float(window_open.get(path.n_from, 0.0))
+        return max(float(window_open.get(path.n_from, 0.0)),
+                   float(window_open.get(path.n_to, 0.0)))
+
     # Pre-build the list of power-law paths we actually solve.
     paths = []
     for p in model.paths:
@@ -99,7 +119,7 @@ def solve_airflow(model, T_out_C, wind_ms=0.0, wind_dir=0.0,
             C = C * leakage_scale
         # window/door opening scales with the window_open fraction
         if el.type_code == 27:
-            mult = mult * window_open
+            mult = mult * _wo(p)
             if mult <= 0:
                 continue
         # wind pressure on ambient-connected paths
@@ -168,14 +188,23 @@ def solve_airflow(model, T_out_C, wind_ms=0.0, wind_dir=0.0,
 
     # Constant-volume-flow elements (interzone mixing fans / AHS) — excluded from
     # the pressure solve (≈zero net mass) but needed for contaminant transport.
+    # Interior fan paths are NORMALIZED: one entry per zone pair at the standard
+    # doorway exchange, however the .prj encodes it (pairs of 1000s, single
+    # 2000s, or per-home oddities all become STD_DOORWAY_M3S each way).
     fans = []  # (a, b, Q_vol m3/s) bidirectional volumetric mixing
+    seen_pairs = set()
     for p in model.paths:
         el = model.elements.get(p.element)
-        if el is not None and el.type_code in FAN_TYPES:
-            Q = float(el.params[0]) * p.mult
-            if p.n_from != -1 and p.n_to != -1:
-                Q *= mixing_scale        # diagnostics: scale interzone mixing fans
-            fans.append((p.n_from, p.n_to, Q))
+        if el is None or el.type_code not in FAN_TYPES:
+            continue
+        if p.n_from != -1 and p.n_to != -1:
+            pair = tuple(sorted((p.n_from, p.n_to)))
+            if pair in seen_pairs:
+                continue
+            seen_pairs.add(pair)
+            fans.append((pair[0], pair[1], STD_DOORWAY_M3S * mixing_scale))
+        else:
+            fans.append((p.n_from, p.n_to, float(el.params[0]) * p.mult))
 
     # Two-way density-driven exchange through OPEN large openings (windows/doors).
     # A one-way power law gives ~zero flow at small net dP, but a real open
@@ -184,7 +213,10 @@ def solve_airflow(model, T_out_C, wind_ms=0.0, wind_dir=0.0,
     # ventilation when windows are open. Scaled by the opening fraction.
     for p in model.paths:
         el = model.elements.get(p.element)
-        if el is None or el.type_code not in DOOR_TYPES or window_open <= 0:
+        if el is None or el.type_code not in DOOR_TYPES:
+            continue
+        wo = _wo(p)
+        if wo <= 0:
             continue
         try:
             H = float(el.params[4]); W = float(el.params[5])
@@ -196,7 +228,7 @@ def solve_airflow(model, T_out_C, wind_ms=0.0, wind_dir=0.0,
         if drho < 1e-4 or H <= 0 or W <= 0:
             continue
         Qexch = (1.0 / 3.0) * DOOR_CD * W * H * np.sqrt(G * H * drho / (0.5 * (rho_a + rho_b)))
-        fans.append((p.n_from, p.n_to, Qexch * window_open * p.mult))
+        fans.append((p.n_from, p.n_to, Qexch * wo * p.mult))
 
     ach = {}
     for z in zone_ids:
@@ -207,6 +239,15 @@ def solve_airflow(model, T_out_C, wind_ms=0.0, wind_dir=0.0,
     total_out_inflow = sum(inflow_from_out.values())  # kg/s
     total_vol = sum(model.zones[z].volume for z in zone_ids)
     whole_home_ach = (total_out_inflow / rho_out) / total_vol * 3600 if total_vol else 0.0
+
+    # Living-space ACH: direct outdoor air into conditioned/occupiable zones
+    # only. Whole-home ACH is dominated by attic/crawlspace cross-flow (wind
+    # blows in one vent and out the other without touching the living space),
+    # so it badly overstates the ventilation people actually experience.
+    liv = [z for z in zone_ids if _tf.is_living(model.zones[z].name)]
+    liv_vol = sum(model.zones[z].volume for z in liv)
+    liv_inflow = sum(inflow_from_out[z] for z in liv)
+    living_ach = (liv_inflow / rho_out) / liv_vol * 3600 if liv_vol else whole_home_ach
 
     # Solver health (instrumentation only — does not alter the solution):
     # per-zone net mass imbalance of the recovered power-law flows + mech sinks.
@@ -225,6 +266,7 @@ def solve_airflow(model, T_out_C, wind_ms=0.0, wind_dir=0.0,
         "P": {z: float(P[idx[z]]) for z in zone_ids},
         "ach": ach,
         "whole_home_ach": whole_home_ach,
+        "living_ach": living_ach,
         "rho_in": rho_in, "rho_out": rho_out,
         "path_flows": path_flows,   # [(a, b, w_mass kg/s)] power-law paths
         "path_types": path_types,   # element type_code aligned with path_flows

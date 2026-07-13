@@ -49,7 +49,9 @@ def load_archetypes():
 
 @st.cache_resource
 def load_model(house):
-    return prj.parse_prj(config.prj_path(house))
+    """Paper home under the uniform-mixing policy (doorway top-up where the
+    shipped file lacks fans; flows normalized in the solver)."""
+    return persily.load_paper_home(house)
 
 
 @st.cache_resource
@@ -128,7 +130,10 @@ def run_persily(entry, scenario):
 
 def metrics_row(ach, peak, mx1, davg):
     c1, c2, c3, c4 = st.columns(4)
-    c1.metric("Air exchange", f"{ach:.2f} /h")
+    c1.metric("Air exchange (living space)", f"{ach:.2f} /h",
+              help="Outdoor air delivered directly to conditioned rooms. "
+                   "Excludes attic/crawlspace cross-flow, which inflates "
+                   "whole-home ACH without ventilating the living space.")
     c2.metric("Kitchen peak NO₂", f"{peak:.0f} ppb")
     c3.metric("Kitchen max 1-hr", f"{mx1:.0f} ppb",
               delta=f"{mx1 - EPA_1HR:.0f} vs EPA/WHO 1-hr", delta_color="inverse")
@@ -253,7 +258,7 @@ if panel == "Single home":
         res_b, _, kit_b = run_persily(below, scenario)
         if above["id"] == below["id"]:
             t, kitchen, havg = res_b["t"], kit_b, home_avg_curve(res_b)
-            ach = res_b["whole_home_ach"]
+            ach = res_b["living_ach"]
             st.caption(
                 f"Closest available {TYPE_NAMES[below['type']]} home: **{below['floor_area_ft2']:,} ft²** "
                 f"({below['id']}); target is at the edge of the range, so no interpolation was needed. "
@@ -263,7 +268,7 @@ if panel == "Single home":
             t = res_b["t"]
             kitchen = (1 - w) * kit_b + w * kit_a
             havg = (1 - w) * home_avg_curve(res_b) + w * home_avg_curve(res_a)
-            ach = (1 - w) * res_b["whole_home_ach"] + w * res_a["whole_home_ach"]
+            ach = (1 - w) * res_b["living_ach"] + w * res_a["living_ach"]
             st.caption(
                 f"Interpolated between **{below['id']}** ({below['floor_area_ft2']:,} ft²) and "
                 f"**{above['id']}** ({above['floor_area_ft2']:,} ft²) — {w:.0%} of the way to the larger. "
@@ -307,7 +312,7 @@ if panel == "Single home":
             + (f", unit {apt_tag}" if apt_tag else "")
             + ". Whole-building stack effect modeled through the stairwell; your unit is shown. "
             "Fidelity for non-paper homes is physically faithful but unvalidated.")
-        metrics_row(res["whole_home_ach"], float(np.max(kitchen[:144])),
+        metrics_row(res["living_ach"], float(np.max(kitchen[:144])),
                     rolling_max_1h(kitchen), float(np.mean(kitchen[:144])))
 
         st.subheader("NO₂ over 24 hours — your unit")
@@ -345,7 +350,7 @@ if panel == "Single home":
         st.caption(f"{home_title} · {len(model.paths)} flow paths · "
                    "first-principles airflow + transport (not a lookup).")
         davg = res["summary"][kname]["dayavg"] if kname in res["summary"] else float(np.mean(kitchen))
-        metrics_row(res["whole_home_ach"], float(np.max(kitchen)), rolling_max_1h(kitchen), davg)
+        metrics_row(res["living_ach"], float(np.max(kitchen)), rolling_max_1h(kitchen), davg)
 
         st.subheader("NO₂ concentration over 24 hours")
         ranked = sorted(res["summary"].items(), key=lambda kv: -kv[1]["peak"])
@@ -454,6 +459,36 @@ else:
     scenario = scenario_sidebar(prefix="dg_", no2_default=0.0)
     st.sidebar.caption("Outdoor NO₂ defaults to 0 here to isolate stove physics "
                        "(the library convention).")
+
+    # --- window detail: all-windows scalar / per-room / scheduled ---
+    wmode = st.sidebar.radio("Window mode",
+                             ["All windows (slider above)", "Per room", "Scheduled"],
+                             key="dg_wmode")
+    window_rooms = sorted({
+        (p.n_to if p.n_from == -1 else p.n_from)
+        for p in model.paths
+        if (el := model.elements.get(p.element)) is not None
+        and el.type_code == 27 and (p.n_from == -1 or p.n_to == -1)})
+    if wmode == "Per room":
+        per = {}
+        for zid in window_rooms:
+            per[zid] = st.sidebar.slider(
+                f"{model.zones[zid].name} window", 0.0, 1.0, 0.0, 0.05,
+                key=f"dg_wroom_{home_id}_{zid}")
+        scenario["window_open"] = per
+    elif wmode == "Scheduled":
+        base = scenario["window_open"]
+        s_open = st.sidebar.slider("Opening while scheduled", 0.0, 1.0, 0.7, 0.05,
+                                   key="dg_ws_open")
+        s_start = st.sidebar.slider("Opens at (hour)", 0.0, 23.0, 18.0, 0.5,
+                                    key="dg_ws_start")
+        s_hours = st.sidebar.slider("Stays open (hours)", 0.5, 12.0, 4.0, 0.5,
+                                    key="dg_ws_hours")
+        scenario["window_schedule"] = [
+            {"start": s_start, "hours": s_hours, "open": s_open}]
+        st.sidebar.caption(f"Base opening {base:g} outside the scheduled interval. "
+                           "Flow metrics (kitchen exchange, boundary tab) use the "
+                           "base state.")
     scen_key = json.dumps(scenario, sort_keys=True)   # hashable cache key
 
     # ---- cached computation wrappers (model objects aren't hashable) ----
@@ -499,6 +534,12 @@ else:
                + (f" · bedroom = {model.zones[roles['bedroom']].name}"
                   if roles["bedroom"] else "")
                + " · all sweeps/checks run the live engine at the sidebar conditions.")
+    if getattr(model, "mixing_added", 0):
+        st.info(f"Uniform-mixing policy: this home's shipped .prj was missing fan "
+                f"mixing on {model.mixing_added} interior doorway(s) — the standard "
+                "2,000 m³/h exchange was added at load. Library ground truth was "
+                "computed WITHOUT it, so engine-vs-library comparisons for this home "
+                "will diverge by design.")
 
     tab_sw, tab_ck, tab_lib, tab_af = st.tabs(
         ["Sensitivity sweeps", "Physics self-checks", "vs. CONTAM library",
@@ -526,19 +567,19 @@ else:
         st.plotly_chart(fig, use_container_width=True)
 
         fig2 = go.Figure()
-        fig2.add_trace(go.Scatter(x=df[knob], y=df["whole_home_ach"],
-                                  mode="lines+markers", name="whole-home ACH (/h)"))
+        fig2.add_trace(go.Scatter(x=df[knob], y=df["living_ach"],
+                                  mode="lines+markers", name="living-space ACH (/h)"))
         fig2.add_trace(go.Scatter(x=df[knob], y=df["kitchen_outdoor_ach"],
                                   mode="lines+markers", name="kitchen outdoor ACH (/h)"))
         fig2.add_trace(go.Scatter(x=df[knob], y=df["kitchen_exchange_m3h"],
                                   mode="lines+markers", name="kitchen↔rest exchange (m³/h)",
                                   yaxis="y2", line=dict(dash="dot")))
         if len(bad):
-            fig2.add_trace(go.Scatter(x=bad[knob], y=bad["whole_home_ach"], mode="markers",
+            fig2.add_trace(go.Scatter(x=bad[knob], y=bad["living_ach"], mode="markers",
                                       name="airflow NOT converged",
                                       marker=dict(symbol="x", size=11, color="#d6453d")))
         fig2.update_layout(xaxis_title=dg.SWEEPS[knob][0],
-                           yaxis=dict(title="air exchange (/h)"),
+                           yaxis=dict(title="living-space air exchange (/h)"),
                            yaxis2=dict(title="exchange (m³/h)", overlaying="y", side="right"),
                            height=340, margin=dict(l=10, r=10, t=30, b=10),
                            legend=dict(orientation="h", yanchor="bottom", y=1.02))
@@ -551,28 +592,30 @@ else:
         st.subheader("Concentration vs. air exchange (parametric)")
         fig3 = go.Figure()
         fig3.add_trace(go.Scatter(
-            x=df["whole_home_ach"], y=df["kitchen_dayavg"], mode="markers+lines",
+            x=df["living_ach"], y=df["kitchen_dayavg"], mode="markers+lines",
             name="kitchen day-avg", text=[f"{knob}={v:g}" for v in df[knob]],
             marker=dict(size=8, color=df[knob], colorscale="Viridis", showscale=True,
                         colorbar=dict(title=knob))))
-        fig3.add_trace(go.Scatter(x=df["whole_home_ach"], y=df["bedroom_dayavg"],
+        fig3.add_trace(go.Scatter(x=df["living_ach"], y=df["bedroom_dayavg"],
                                   mode="markers+lines", name="bedroom day-avg",
                                   line=dict(dash="dot")))
-        fig3.update_layout(xaxis_title="whole-home ACH (/h)", yaxis_title="NO₂ (ppb)",
+        fig3.update_layout(xaxis_title="living-space ACH (/h)", yaxis_title="NO₂ (ppb)",
                            height=340, margin=dict(l=10, r=10, t=30, b=10),
                            legend=dict(orientation="h", yanchor="bottom", y=1.02))
         st.plotly_chart(fig3, use_container_width=True)
         st.caption("Air exchange is EMERGENT (leakage + stack + wind + windows), so this "
                    "traces C(ACH) as the sweep knob moves it — different knobs trace "
-                   "different curves. Kitchen↔rest exchange = volumetric inflow to the "
-                   "kitchen from other rooms (doorway fans + interior leaks), fans-off regime.")
+                   "different curves. Living-space ACH counts outdoor air delivered "
+                   "directly to conditioned rooms (attic/crawl cross-flow excluded). "
+                   "Kitchen↔rest exchange = volumetric inflow to the kitchen from other "
+                   "rooms (doorway fans + interior leaks), fans-off base-window regime.")
 
         st.subheader("Tornado — one step on every knob")
         with st.spinner("Perturbing each knob…"):
             tdf, base_m = c_tornado(home_id, scen_key, model, roles, scenario, kz_sim)
         figt = go.Figure()
         for col, color in (("kitchen_dayavg", "#e8743b"), ("bedroom_dayavg", "#4063d8"),
-                           ("whole_home_ach", "#2f9e57")):
+                           ("living_ach", "#2f9e57")):
             figt.add_trace(go.Bar(y=tdf["perturbation"], x=tdf[col], orientation="h",
                                   name=col.replace("_", " "), marker_color=color))
         figt.update_layout(xaxis_title="% change from base", barmode="group", height=380,
@@ -581,7 +624,7 @@ else:
         st.plotly_chart(figt, use_container_width=True)
         st.caption(f"Base point: kitchen day-avg {base_m['kitchen_dayavg']:.1f} ppb · "
                    f"bedroom {base_m['bedroom_dayavg']:.1f} ppb · "
-                   f"ACH {base_m['whole_home_ach']:.2f}/h · "
+                   f"living-space ACH {base_m['living_ach']:.2f}/h · "
                    f"kitchen↔rest {base_m['kitchen_exchange_m3h']:,.0f} m³/h.")
 
     # -------------------------- B. self-checks --------------------------
@@ -611,7 +654,7 @@ else:
             st.dataframe(ddf.round(4), use_container_width=True, hide_index=True)
         with cB:
             st.metric("Slowest system mode", f"{refs['slowest_mode_per_h']:.3f} /h")
-            st.metric("Naive whole-home ACH + decay", f"{refs['ach_plus_decay_per_h']:.3f} /h")
+            st.metric("Naive living-space ACH + decay", f"{refs['ach_plus_decay_per_h']:.3f} /h")
         st.caption("Fitted on ln(C − overnight floor), hours 20–24. All rooms should relax "
                    "at the slowest eigenvalue of the fans-off transport matrix — the same "
                    "analysis as a field tracer-decay experiment. The naive ACH+k rate "

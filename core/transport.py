@@ -62,16 +62,22 @@ def _no2_sources(model, kitchen_zone=None):
 def simulate(model, *, T_out_C=10.0, wind_ms=2.0, wind_dir=0.0, window_open=0.0,
              hood="NoHood", cooking=None, C_out_ppb=0.0, T_in_C=23.0,
              emission_scale=1.0, kitchen_zone=None, hours=24, dt_min=10,
-             shower_schedule=None, leakage_scale=1.0, mixing_scale=1.0,
-             return_internals=False):
+             shower_schedule=None, window_schedule=None,
+             leakage_scale=1.0, mixing_scale=1.0, return_internals=False):
     """Run a day of NO2 transport. Returns time series + per-zone summary.
 
-    Mechanical exhaust fans run on SCHEDULES, so the airflow network changes over
-    the day: the kitchen fan runs while cooking, bath fans during showers. We
-    solve the airflow once per distinct fan regime and integrate transport
-    piecewise (an exact matrix-exponential step per regime). Homes with no
-    mechanical exhaust (all CS-11 + the modified 24) collapse to a single regime
-    — identical to the steady-airflow behavior.
+    Mechanical exhaust fans and window openings run on SCHEDULES, so the
+    airflow network changes over the day: the kitchen fan runs while cooking,
+    bath fans during showers, windows follow window_schedule. We solve the
+    airflow once per distinct (fan state, window state) regime and integrate
+    transport piecewise (an exact matrix-exponential step per regime). Homes
+    with no mechanical exhaust and no window schedule collapse to a single
+    regime — identical to the steady-airflow behavior.
+
+    window_open: fraction 0..1 for all windows, or {zone_id: fraction}.
+    window_schedule: list of {"start": hour, "hours": duration, "open": value}
+    intervals; `open` (scalar or dict) REPLACES window_open while active
+    (first matching interval wins), reverting to window_open otherwise.
 
     Diagnostics knobs (all no-op at defaults): leakage_scale / mixing_scale pass
     through to the airflow solver; return_internals attaches exact per-step
@@ -101,10 +107,21 @@ def simulate(model, *, T_out_C=10.0, wind_ms=2.0, wind_dir=0.0, window_open=0.0,
     def shower_active(t_h):
         return any(s <= t_h < s + d / 60.0 for s, d in showers)
 
-    # --- airflow per fan regime (kitchen_fan_on, bath_fan_on) ---
+    def _wkey(w):
+        """Hashable regime key for a window state (scalar or per-room dict)."""
+        return tuple(sorted(w.items())) if isinstance(w, dict) else float(w)
+
+    def win_state(t_h):
+        if window_schedule:
+            for e in window_schedule:
+                if e["start"] <= t_h < e["start"] + e.get("hours", 0.0):
+                    return e["open"]
+        return window_open
+
+    # --- airflow per regime (kitchen fan, bath fan, window state) ---
     afr_cache = {}
-    def airflow_for(kf, bf):
-        key = (kf, bf)
+    def airflow_for(kf, bf, ws):
+        key = (kf, bf, _wkey(ws))
         if key not in afr_cache:
             me = {}
             if kf:
@@ -113,11 +130,11 @@ def simulate(model, *, T_out_C=10.0, wind_ms=2.0, wind_dir=0.0, window_open=0.0,
                 me.update(bath_mech)
             afr_cache[key] = af.solve_airflow(
                 model, T_out_C=T_out_C, wind_ms=wind_ms, wind_dir=wind_dir,
-                window_open=window_open, T_in_C=T_in_C, mech_extract=me,
+                window_open=ws, T_in_C=T_in_C, mech_extract=me,
                 leakage_scale=leakage_scale, mixing_scale=mixing_scale)
         return afr_cache[key]
 
-    zone_ids = airflow_for(False, False)["zone_ids"]
+    zone_ids = airflow_for(False, False, win_state(0.0))["zone_ids"]
     idx = {z: i for i, z in enumerate(zone_ids)}
     nz = len(zone_ids)
     V = np.array([model.zones[z].volume for z in zone_ids])
@@ -173,26 +190,29 @@ def simulate(model, *, T_out_C=10.0, wind_ms=2.0, wind_dir=0.0, window_open=0.0,
     dt = dt_min * 60.0
     nsteps = int(round(hours * 3600 / dt))
 
-    reg_cache = {}     # (kf, bf) -> (A, Phi, Qout_in, Qout_out, ach)
-    def regime(kf, bf):
-        if (kf, bf) not in reg_cache:
-            afr = airflow_for(kf, bf)
+    reg_cache = {}     # regime key -> (A, Phi, Qout_in, Qout_out, ach, living_ach)
+    def regime(kf, bf, ws):
+        key = (kf, bf, _wkey(ws))
+        if key not in reg_cache:
+            afr = airflow_for(kf, bf, ws)
             A, Qoi, Qoo = build(afr)
-            reg_cache[(kf, bf)] = (A, expm(A * dt), Qoi, Qoo, afr["whole_home_ach"])
-        return reg_cache[(kf, bf)]
+            reg_cache[key] = (A, expm(A * dt), Qoi, Qoo,
+                              afr["whole_home_ach"], afr["living_ach"])
+        return reg_cache[key]
 
-    mint_cache = {}    # (kf, bf) -> A^-1 (Phi - I), for exact per-step ∫C dt
-    def step_integral_op(kf, bf):
-        if (kf, bf) not in mint_cache:
-            A, Phi, _, _, _ = regime(kf, bf)
-            mint_cache[(kf, bf)] = np.linalg.solve(A, Phi - np.eye(nz))
-        return mint_cache[(kf, bf)]
+    mint_cache = {}    # regime key -> A^-1 (Phi - I), for exact per-step ∫C dt
+    def step_integral_op(kf, bf, ws):
+        key = (kf, bf, _wkey(ws))
+        if key not in mint_cache:
+            A, Phi, _, _, _, _ = regime(kf, bf, ws)
+            mint_cache[key] = np.linalg.solve(A, Phi - np.eye(nz))
+        return mint_cache[key]
 
-    state_cache = {}   # (kf, bf, ct, ov) -> steady-state C
-    def steady(kf, bf, ct, ov):
-        key = (kf, bf, ct, ov)
+    state_cache = {}   # (regime, ct, ov) -> steady-state C
+    def steady(kf, bf, ws, ct, ov):
+        key = (kf, bf, _wkey(ws), ct, ov)
         if key not in state_cache:
-            A, _, Qoi, _, _ = regime(kf, bf)
+            A, _, Qoi, _, _, _ = regime(kf, bf, ws)
             b = b_vector(Qoi, ct, ov)
             try:
                 Css = np.linalg.solve(A, -b)
@@ -202,19 +222,21 @@ def simulate(model, *, T_out_C=10.0, wind_ms=2.0, wind_dir=0.0, window_open=0.0,
         return state_cache[key]
 
     C = np.full(nz, C_out_ppb)    # start near outdoor
-    times, series, ach_t = [], [], []
+    times, series, ach_t, liv_t = [], [], [], []
     cint_t, g_t, qoi_t, qoo_t = [], [], [], []       # internals (diagnostics)
+    ws = win_state(0.0)
     for step in range(nsteps + 1):
         t_h = step * dt / 3600.0
         ct, ov = cooking_active(t_h)
         kf = bool(kit_mech) and (ct or ov)            # kitchen fan runs while cooking
         bf = bool(bath_mech) and shower_active(t_h)   # bath fans run during showers
-        _, Phi, Qoi, Qoo, ach = regime(kf, bf)
-        times.append(t_h); series.append(C.copy()); ach_t.append(ach)
-        Css = steady(kf, bf, ct, ov)
+        ws = win_state(t_h)                           # window state (scheduled)
+        _, Phi, Qoi, Qoo, ach, liv = regime(kf, bf, ws)
+        times.append(t_h); series.append(C.copy()); ach_t.append(ach); liv_t.append(liv)
+        Css = steady(kf, bf, ws, ct, ov)
         if return_internals and step < nsteps:
             # exact ∫C dt over the step: Css·dt + A⁻¹(Φ−I)(C0 − Css)
-            cint_t.append(Css * dt + step_integral_op(kf, bf) @ (series[-1] - Css))
+            cint_t.append(Css * dt + step_integral_op(kf, bf, ws) @ (series[-1] - Css))
             g_t.append(g_vec(ct, ov) / PPB_TO_KGM3)   # emission, ppb·m³/s per zone
             qoi_t.append(Qoi); qoo_t.append(Qoo)      # outdoor exchange, m³/s per zone
         C = Css + Phi @ (series[-1] - Css)
@@ -235,9 +257,10 @@ def simulate(model, *, T_out_C=10.0, wind_ms=2.0, wind_dir=0.0, window_open=0.0,
         "t": np.array(times), "series": series, "by_zone": by_zone,
         "summary": summary, "zone_ids": zone_ids, "names": names,
         "whole_home_ach": float(np.mean(ach_t[:n24])),   # day-average air exchange
+        "living_ach": float(np.mean(liv_t[:n24])),       # day-average, living zones
     }
     if return_internals:
-        A_night, _, _, _, _ = regime(False, False)       # fans-off system matrix
+        A_night, _, _, _, _, _ = regime(False, False, ws)  # fans-off, overnight windows
         out["internals"] = {
             "Cint": np.array(cint_t),      # (nsteps, nz) ppb·s — exact ∫C dt per step
             "g": np.array(g_t),            # (nsteps, nz) ppb·m³/s — emission rate

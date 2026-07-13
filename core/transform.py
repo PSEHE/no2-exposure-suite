@@ -202,24 +202,64 @@ def _interior_doorways(model):
     return pairs
 
 
-def _add_mixing_fans(model):
-    """Add a bidirectional 1000 m3/h mixing fan-pair on each interior doorway,
-    mirroring how the modified homes encode them (two opposed fan paths)."""
-    fan_elem_id = _next_id(model.elements)
-    model.elements[fan_elem_id] = FlowElement(
-        fan_elem_id, FAN_TYPE_CODE, "fan_cvf", "ConstantVolFlow",
-        list(FAN_ELEM_PARAMS))
+def _fan_element_id(model):
+    """Reuse the model's fan_cvf element, or create the standard one."""
+    for eid, el in model.elements.items():
+        if el.type_code == FAN_TYPE_CODE and "fan_cvf" in _norm(el.name):
+            return eid
+    eid = _next_id(model.elements)
+    model.elements[eid] = FlowElement(
+        eid, FAN_TYPE_CODE, "fan_cvf", "ConstantVolFlow", list(FAN_ELEM_PARAMS))
+    return eid
+
+
+def _add_fan_pairs(model, pairs):
+    """Add a bidirectional mixing fan-pair (two opposed fan paths, mirroring
+    how the modified homes encode them) for each given zone pair."""
+    pairs = sorted(pairs)
+    if not pairs:
+        return 0
+    fan_elem_id = _fan_element_id(model)
     pid = _next_id({p.id: p for p in model.paths})
-    n = 0
-    for a, b in sorted(_interior_doorways(model)):
+    for a, b in pairs:
         for (nf, nt) in ((a, b), (b, a)):
             model.paths.append(FlowPath(
                 id=pid, n_from=nf, n_to=nt, element=fan_elem_id,
                 relHt=1.219, mult=1.0, wind_profile=0, wPmod=0.0, wazm=0.0,
                 sched=0.0))
             pid += 1
-        n += 1
-    return n
+    return len(pairs)
+
+
+def _add_mixing_fans(model):
+    """Add mixing fan-pairs on every interior doorway of a raw home."""
+    return _add_fan_pairs(model, _interior_doorways(model))
+
+
+def existing_fan_pairs(model):
+    """Unordered interior zone pairs already joined by a constant-flow fan."""
+    pairs = set()
+    for p in model.paths:
+        el = model.elements.get(p.element)
+        if (el is not None and el.type_code in (29, FAN_TYPE_CODE)
+                and p.n_from != -1 and p.n_to != -1):
+            pairs.add(tuple(sorted((p.n_from, p.n_to))))
+    return pairs
+
+
+def ensure_standard_mixing(model, extra_pairs=None):
+    """Add standard doorway mixing wherever it is missing.
+
+    Doorway candidates = the model's own passage geometry plus `extra_pairs`
+    (e.g. recovered from a home's raw NIST twin when the modified file deleted
+    the door paths). Makes every home carry the fan mixing — several shipped
+    Sci. Adv. files lack it (AH-21/DH-7/APT-4 entirely; APT-3 mixed only the
+    one modeled unit). The airflow solver additionally normalizes every pair's
+    flow to the standard value, so this only needs to create the CONNECTIONS."""
+    want = set(_interior_doorways(model)) | set(extra_pairs or ())
+    missing = {(a, b) for (a, b) in want
+               if a in model.zones and b in model.zones} - existing_fan_pairs(model)
+    return _add_fan_pairs(model, missing)
 
 
 MECH_VENT_MIN = 0.005   # kg/s; below this net flow an AHS is treated as recirculating
@@ -262,16 +302,20 @@ def _mechanical_ventilation(model):
     return extract
 
 
-def apply_modifications(model, *, verbose=False):
+def apply_modifications(model, *, verbose=False, extra_doorways=None):
     """Mutate `model` in place to the Sci. Adv. modified form; return it.
 
-    No-op (besides phantom-zone cleanup) on already-modified homes. The existing
-    24 were calibrated with the AHS ignored, so we do NOT add mechanical
-    ventilation to them — only to the raw NIST homes."""
+    On already-modified homes: phantom-zone cleanup + doorway-mixing top-up
+    (uniform mixing policy — every home gets the standard fan mixing even
+    where the shipped file lacks it; `extra_doorways` supplies pairs recovered
+    from a raw twin). The existing 24 were calibrated with the AHS ignored, so
+    we do NOT add mechanical ventilation to them — only to the raw NIST homes."""
     if already_modified(model):
         dropped = _drop_phantom_zones(model)
+        model.mixing_added = ensure_standard_mixing(model, extra_doorways)
         if verbose:
-            print(f"  already modified; dropped {dropped} phantom zone(s)")
+            print(f"  already modified; dropped {dropped} phantom zone(s), "
+                  f"added {model.mixing_added} missing doorway pair(s)")
         return model
     model.mech_extract = _mechanical_ventilation(model)   # before dropping AHS nodes
     dropped = _drop_phantom_zones(model)

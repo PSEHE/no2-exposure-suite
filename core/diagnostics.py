@@ -27,7 +27,7 @@ import numpy as np
 import pandas as pd
 
 from . import airflow as af
-from . import config, prj, transform, transport
+from . import config, persily, transform, transport
 
 PPB_TO_KGM3 = transport.PPB_TO_KGM3
 
@@ -149,6 +149,7 @@ def run_case(model, roles, scenario, kitchen_zone=None,
     havg = ser[:, [zi[z] for z in liv]] @ wv       # volume-weighted living avg
 
     out = {
+        "living_ach": res["living_ach"],
         "whole_home_ach": res["whole_home_ach"],
         "kitchen_outdoor_ach": float(afr["ach"].get(roles["kitchen"], np.nan)),
         "kitchen_exchange_m3h": kb["interzone_m3h"],
@@ -180,10 +181,10 @@ SWEEPS = {
     "T_in_C": ("Indoor temperature (°C)", np.linspace(15, 28, 14)),
 }
 
-SWEEP_OUTPUTS = ["whole_home_ach", "kitchen_outdoor_ach", "kitchen_exchange_m3h",
-                 "kitchen_turnover_ach", "kitchen_peak", "kitchen_max1h",
-                 "kitchen_dayavg", "bedroom_dayavg", "homeavg_dayavg",
-                 "solver_converged"]
+SWEEP_OUTPUTS = ["living_ach", "whole_home_ach", "kitchen_outdoor_ach",
+                 "kitchen_exchange_m3h", "kitchen_turnover_ach", "kitchen_peak",
+                 "kitchen_max1h", "kitchen_dayavg", "bedroom_dayavg",
+                 "homeavg_dayavg", "solver_converged"]
 
 
 def sweep(model, roles, base_scenario, knob, values=None, kitchen_zone=None):
@@ -198,10 +199,16 @@ def sweep(model, roles, base_scenario, knob, values=None, kitchen_zone=None):
     return pd.DataFrame(recs)
 
 
+def _step_window(s):
+    if isinstance(s, dict):     # per-room state: bump every room
+        return {k: min(1.0, v + 0.1) for k, v in s.items()}
+    return min(1.0, s + 0.1)
+
+
 TORNADO_STEPS = {
     "T_out_C": ("Outdoor temp +5 °C", lambda s: s + 5.0),
     "wind_ms": ("Wind +1 m/s", lambda s: s + 1.0),
-    "window_open": ("Window opening +0.1", lambda s: min(1.0, s + 0.1)),
+    "window_open": ("Window opening +0.1", _step_window),
     "mixing_scale": ("Interzone mixing ×1.5", lambda s: s * 1.5),
     "leakage_scale": ("Envelope leakage ×1.5", lambda s: s * 1.5),
     "T_in_C": ("Indoor temp +2 °C", lambda s: s + 2.0),
@@ -211,7 +218,7 @@ TORNADO_STEPS = {
 
 def tornado(model, roles, base_scenario, kitchen_zone=None,
             outputs=("kitchen_dayavg", "bedroom_dayavg", "kitchen_peak",
-                     "whole_home_ach")):
+                     "living_ach")):
     """One defined step per knob from the base point; % change per output."""
     defaults = {"mixing_scale": 1.0, "leakage_scale": 1.0, "T_in_C": 23.0,
                 "emission_scale": 1.0}
@@ -296,7 +303,7 @@ def decay_fit(res, roles, window_h=(20.0, 24.0)):
         rows.append({"room": label, "fitted_per_h": -float(coef[0]),
                      "r2": 1.0 - ss_res / ss_tot if ss_tot > 0 else np.nan})
     refs = {"slowest_mode_per_h": slow_mode,
-            "ach_plus_decay_per_h": res["whole_home_ach"] + k * 3600.0}
+            "ach_plus_decay_per_h": res["living_ach"] + k * 3600.0}
     return pd.DataFrame(rows), refs
 
 
@@ -390,14 +397,14 @@ def scaling_laws(model, T_in_C=23.0):
     dTs = np.array([1.0, 2.0, 4.0, 8.0, 16.0, 30.0])
     ach_T = np.array([max(1e-9, af.solve_airflow(
         model, T_out_C=T_in_C - dT, T_in_C=T_in_C, wind_ms=0.0,
-        window_open=0.0, mech_extract={}, **CONVERGED)["whole_home_ach"])
+        window_open=0.0, mech_extract={}, **CONVERGED)["living_ach"])
         for dT in dTs])
     slope_T = float(np.polyfit(np.log(dTs), np.log(ach_T), 1)[0])
 
     vs = np.array([0.5, 1.0, 2.0, 4.0, 8.0, 12.0])
     ach_v = np.array([max(1e-9, af.solve_airflow(
         model, T_out_C=T_in_C, T_in_C=T_in_C, wind_ms=v,
-        window_open=0.0, mech_extract={}, **CONVERGED)["whole_home_ach"])
+        window_open=0.0, mech_extract={}, **CONVERGED)["living_ach"])
         for v in vs])
     slope_v = float(np.polyfit(np.log(vs), np.log(ach_v), 1)[0])
 
@@ -421,7 +428,7 @@ def convergence_scan(model):
                 a2 = af.solve_airflow(model, T_out_C=T, wind_ms=v,
                                       window_open=wo, mech_extract={},
                                       **CONVERGED)
-                r1, r2 = a1["whole_home_ach"], a2["whole_home_ach"]
+                r1, r2 = a1["living_ach"], a2["living_ach"]
                 rows.append({
                     "temp": temp, "wind": wind, "window": window,
                     "ach_production": r1, "ach_converged": r2,
@@ -460,7 +467,7 @@ def axis_response(house, axis, metric="dayavg", overrides=None, progress=None):
     """Engine vs library along ONE category axis, others at the reference."""
     from . import library as lib
     from . import validate as V
-    model = prj.parse_prj(config.prj_path(house))
+    model = persily.load_paper_home(house)
     no2, _ = lib.load_library()
     ref = {**REF, **(overrides or {})}
     rows = []
@@ -485,7 +492,7 @@ def scatter_sample(house, n=100, seed=0, progress=None):
     occupancy weightings are post-processing on the same run."""
     from . import library as lib
     from . import validate as V
-    model = prj.parse_prj(config.prj_path(house))
+    model = persily.load_paper_home(house)
     no2, _ = lib.load_library()
     allc = list(itertools.product(AXES["hood"], AXES["use"], AXES["window"],
                                   AXES["temp"], AXES["wind"], OCS))
