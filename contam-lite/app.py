@@ -544,18 +544,25 @@ elif panel == "Population & health":
     base_no2 = prof["outdoor_no2_ppb"]
     BASE_HOOD_PCT = 22          # paper-default effective-hood adoption
 
+    # Per-jurisdiction widget keys: Streamlit keeps a keyed slider's value across
+    # reruns (frontend included), so a shared key would keep DISPLAYING the prior
+    # jurisdiction's number even after `value=` changes. A jcode-scoped key mounts
+    # a fresh slider per jurisdiction → it initializes to that jurisdiction's
+    # baseline on first visit (and remembers any policy you set there on return).
+    kg, kh, kn = f"j_gas_{jcode}", f"j_hood_{jcode}", f"j_no2_{jcode}"
+
     st.sidebar.subheader("Policy levers")
     st.sidebar.caption(f"Defaults are **{juris.display_name(jcode)}**'s current conditions. "
                        "Move a lever to model a policy; the headline shows the change from "
                        "that baseline.")
     gas_pct = st.sidebar.slider("Gas/propane cooking prevalence (%)", 0, 100,
-                                gas_default, key="j_gas")
+                                gas_default, key=kg)
     hood_pct = st.sidebar.slider("Homes with effective vented ventilation (%)", 0, 100,
-                                 BASE_HOOD_PCT, key="j_hood",
+                                 BASE_HOOD_PCT, key=kh,
                                  help="Effective vented range-hood / kitchen-exhaust "
                                       "adoption. A ventilation standard raises this.")
     out_no2 = st.sidebar.slider("Outdoor NO₂ (ppb)", 0.0, 40.0, float(round(base_no2, 1)),
-                                0.5, key="j_no2",
+                                0.5, key=kn,
                                 help="Ambient NO₂ from traffic/outdoor sources. Affects "
                                      "total exposure shown; the stove-attributable health "
                                      "burden below is driven by the prevalence and "
