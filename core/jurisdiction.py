@@ -61,6 +61,22 @@ def display_name(code):
 # jurisdiction population into a household count for absolute burden scaling.
 PERSONS_PER_HOUSEHOLD = 2.51
 
+# Effective-range-hood default, by housing vintage (a PROXY — no survey measures
+# vented-hood prevalence at state resolution; RECS omits it entirely). Values are
+# the modeled probability a home of each vintage has a vented hood that is
+# actually used effectively. Anchored to LBNL findings that ~76-80% of homes
+# built since 2003 have a vented hood (Chan/Singer et al.), ramped down for older
+# stock; the whole ramp is then scaled by a single use factor so the
+# population-weighted US average equals the source paper's national effective
+# share. State-to-state variation therefore comes from the (measured) vintage
+# mix, while the national level stays pinned to the paper.
+PRESENCE_BY_VINTAGE = {
+    "vintage_prior_1940": 0.20, "vintage_1940_1959": 0.25,
+    "vintage_1960_1979": 0.35, "vintage_1980_1999": 0.55,
+    "vintage_2000_2009": 0.75, "vintage_2010s": 0.80,
+}
+TARGET_NATIONAL_EFFECTIVE = 0.22   # paper's DEF_HOOD 50CE+75CE share
+
 
 # --- housing-stock -> 24-archetype weights -------------------------------
 def house_weights_from_marginals(types, sqft, vintage, p_single, p_ac):
@@ -123,6 +139,8 @@ def build_profiles():
         p_single = wm("story_eq_1") / 100.0
         p_ac = wm("centralAC") / 100.0
         hw = house_weights_from_marginals(types, sqft, vintage, p_single, p_ac)
+        hood_presence = sum(vintage.get(v, 0.0) * PRESENCE_BY_VINTAGE[v]
+                            for v in VINTAGE_COLS)
 
         # seasonal temperature mix: 50% winter + 50% summer category shares
         temps = {t: 0.0 for t in TEMP_CATS}
@@ -151,6 +169,7 @@ def build_profiles():
                 "Multifamily": round((types.get("MF24", 0) + types.get("MF5+", 0)) * 100, 1),
             },
             "central_ac_pct": round(p_ac * 100, 1),
+            "hood_presence": round(hood_presence, 4),   # pre-calibration proxy
         }
 
     profiles = {"US": aggregate(df, "United States", "US")}
@@ -165,6 +184,13 @@ def build_profiles():
     for code, sub in df.groupby("STATE"):
         if isinstance(code, str) and code.strip():
             profiles[code] = aggregate(sub, code, code)
+
+    # Calibrate the vintage-proxy so the US effective-hood default hits the
+    # paper's national share; states then vary by their vintage mix.
+    use_factor = (TARGET_NATIONAL_EFFECTIVE / profiles["US"]["hood_presence"]
+                  if profiles["US"]["hood_presence"] > 0 else 0.0)
+    for p in profiles.values():
+        p["hood_pct_default"] = round(100 * use_factor * p["hood_presence"], 1)
     return profiles
 
 

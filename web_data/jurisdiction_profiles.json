@@ -3,6 +3,8 @@
   "central_ac_pct": 85.5,
   "code": "AL",
   "gas_pct": 26.06,
+  "hood_pct_default": 23.9,
+  "hood_presence": 0.4881,
   "house_weights": {
    "AH-1": 0.00301,
    "AH-21": 0.005665,
@@ -53,6 +55,8 @@
   "central_ac_pct": 84.0,
   "code": "AR",
   "gas_pct": 30.17,
+  "hood_pct_default": 24.3,
+  "hood_presence": 0.4961,
   "house_weights": {
    "AH-1": 0.003313,
    "AH-21": 0.006311,
@@ -103,6 +107,8 @@
   "central_ac_pct": 83.2,
   "code": "AZ",
   "gas_pct": 34.41,
+  "hood_pct_default": 26.5,
+  "hood_presence": 0.5407,
   "house_weights": {
    "AH-1": 0.008956,
    "AH-21": 0.016164,
@@ -154,6 +160,8 @@
   "central_ac_pct": 50.8,
   "code": "CA",
   "gas_pct": 68.88,
+  "hood_pct_default": 20.9,
+  "hood_presence": 0.4273,
   "house_weights": {
    "AH-1": 0.02011,
    "AH-21": 0.022095,
@@ -205,6 +213,8 @@
   "central_ac_pct": 48.2,
   "code": "CO",
   "gas_pct": 23.8,
+  "hood_pct_default": 24.0,
+  "hood_presence": 0.4901,
   "house_weights": {
    "AH-1": 0.017905,
    "AH-21": 0.022406,
@@ -256,6 +266,8 @@
   "central_ac_pct": 52.1,
   "code": "CT",
   "gas_pct": 36.73,
+  "hood_pct_default": 18.2,
+  "hood_presence": 0.372,
   "house_weights": {
    "AH-1": 0.016891,
    "AH-21": 0.016635,
@@ -305,6 +317,8 @@
   "central_ac_pct": 51.3,
   "code": "DC",
   "gas_pct": 20.99,
+  "hood_pct_default": 16.3,
+  "hood_presence": 0.3328,
   "house_weights": {
    "AH-1": 0.167286,
    "AH-21": 0.043924,
@@ -350,6 +364,8 @@
   "central_ac_pct": 74.3,
   "code": "DE",
   "gas_pct": 21.59,
+  "hood_pct_default": 23.7,
+  "hood_presence": 0.4839,
   "house_weights": {
    "AH-1": 0.028893,
    "AH-21": 0.050165,
@@ -399,6 +415,8 @@
   "central_ac_pct": 89.9,
   "code": "FL",
   "gas_pct": 15.76,
+  "hood_pct_default": 25.1,
+  "hood_presence": 0.5127,
   "house_weights": {
    "AH-1": 0.016052,
    "AH-21": 0.023238,
@@ -448,6 +466,8 @@
   "central_ac_pct": 87.0,
   "code": "GA",
   "gas_pct": 29.7,
+  "hood_pct_default": 25.8,
+  "hood_presence": 0.5264,
   "house_weights": {
    "AH-1": 0.007835,
    "AH-21": 0.01327,
@@ -498,6 +518,8 @@
   "central_ac_pct": 53.7,
   "code": "IA",
   "gas_pct": 33.69,
+  "hood_pct_default": 19.7,
+  "hood_presence": 0.4012,
   "house_weights": {
    "AH-1": 0.009812,
    "AH-21": 0.014218,
@@ -547,6 +569,8 @@
   "central_ac_pct": 49.0,
   "code": "ID",
   "gas_pct": 24.93,
+  "hood_pct_default": 24.5,
+  "hood_presence": 0.4995,
   "house_weights": {
    "AH-1": 0.005579,
    "AH-21": 0.010456,
@@ -596,6 +620,8 @@
   "central_ac_pct": 54.9,
   "code": "IL",
   "gas_pct": 47.86,
+  "hood_pct_default": 19.3,
+  "hood_presence": 0.3942,
   "house_weights": {
    "AH-1": 0.017941,
    "AH-21": 0.019937,
@@ -647,6 +673,8 @@
   "central_ac_pct": 60.6,
   "code": "IN",
   "gas_pct": 41.42,
+  "hood_pct_default": 21.1,
+  "hood_presence": 0.4303,
   "house_weights": {
    "AH-1": 0.008065,
    "AH-21": 0.013111,
@@ -698,6 +726,8 @@
   "central_ac_pct": 69.4,
   "code": "KS",
   "gas_pct": 26.33,
+  "hood_pct_default": 20.8,
+  "hood_presence": 0.4254,
   "house_weights": {
    "AH-1": 0.010582,
    "AH-21": 0.016439,
@@ -749,6 +779,8 @@
   "central_ac_pct": 74.5,
   "code": "KY",
   "gas_pct": 17.74,
+  "hood_pct_default": 22.8,
+  "hood_presence": 0.4655,
   "house_weights": {
    "AH-1": 0.005935,
    "AH-21": 0.009154,
@@ -798,6 +830,8 @@
   "central_ac_pct": 85.6,
   "code": "LA",
   "gas_pct": 26.65,
+  "hood_pct_default": 23.0,
+  "hood_presence": 0.4704,
   "house_weights": {
    "AH-1": 0.005168,
    "AH-21": 0.009131,
@@ -848,6 +882,8 @@
   "central_ac_pct": 47.9,
   "code": "MA",
   "gas_pct": 44.46,
+  "hood_pct_default": 17.6,
+  "hood_presence": 0.3586,
   "house_weights": {
    "AH-1": 0.019009,
    "AH-21": 0.016052,
@@ -897,6 +933,8 @@
   "central_ac_pct": 73.2,
   "code": "MD",
   "gas_pct": 21.08,
+  "hood_pct_default": 21.7,
+  "hood_presence": 0.4436,
   "house_weights": {
    "AH-1": 0.058496,
    "AH-21": 0.067029,
@@ -948,6 +986,8 @@
   "central_ac_pct": 41.7,
   "code": "ME",
   "gas_pct": 25.01,
+  "hood_pct_default": 20.7,
+  "hood_presence": 0.4221,
   "house_weights": {
    "AH-1": 0.006483,
    "AH-21": 0.008745,
@@ -998,6 +1038,8 @@
   "central_ac_pct": 56.2,
   "code": "MI",
   "gas_pct": 48.74,
+  "hood_pct_default": 19.8,
+  "hood_presence": 0.4033,
   "house_weights": {
    "AH-1": 0.011397,
    "AH-21": 0.015393,
@@ -1048,6 +1090,8 @@
   "central_ac_pct": 42.9,
   "code": "MN",
   "gas_pct": 35.27,
+  "hood_pct_default": 21.5,
+  "hood_presence": 0.4396,
   "house_weights": {
    "AH-1": 0.020443,
    "AH-21": 0.025301,
@@ -1098,6 +1142,8 @@
   "central_ac_pct": 71.5,
   "code": "MO",
   "gas_pct": 22.65,
+  "hood_pct_default": 21.8,
+  "hood_presence": 0.445,
   "house_weights": {
    "AH-1": 0.007671,
    "AH-21": 0.012099,
@@ -1149,6 +1195,8 @@
   "central_ac_pct": 84.9,
   "code": "MS",
   "gas_pct": 29.72,
+  "hood_pct_default": 24.1,
+  "hood_presence": 0.4921,
   "house_weights": {
    "AH-1": 0.002333,
    "AH-21": 0.004438,
@@ -1199,6 +1247,8 @@
   "central_ac_pct": 44.4,
   "code": "MT",
   "gas_pct": 27.21,
+  "hood_pct_default": 22.0,
+  "hood_presence": 0.4486,
   "house_weights": {
    "AH-1": 0.008328,
    "AH-21": 0.012243,
@@ -1248,6 +1298,8 @@
   "central_ac_pct": 82.6,
   "code": "NC",
   "gas_pct": 26.38,
+  "hood_pct_default": 25.2,
+  "hood_presence": 0.5138,
   "house_weights": {
    "AH-1": 0.00839,
    "AH-21": 0.016296,
@@ -1299,6 +1351,8 @@
   "central_ac_pct": 32.3,
   "code": "ND",
   "gas_pct": 26.55,
+  "hood_pct_default": 22.6,
+  "hood_presence": 0.4616,
   "house_weights": {
    "AH-1": 0.018659,
    "AH-21": 0.017964,
@@ -1349,6 +1403,8 @@
   "central_ac_pct": 56.9,
   "code": "NE",
   "gas_pct": 23.87,
+  "hood_pct_default": 20.5,
+  "hood_presence": 0.4183,
   "house_weights": {
    "AH-1": 0.00957,
    "AH-21": 0.013117,
@@ -1398,6 +1454,8 @@
   "central_ac_pct": 53.8,
   "code": "NH",
   "gas_pct": 31.86,
+  "hood_pct_default": 21.2,
+  "hood_presence": 0.4323,
   "house_weights": {
    "AH-1": 0.013943,
    "AH-21": 0.016788,
@@ -1447,6 +1505,8 @@
   "central_ac_pct": 59.7,
   "code": "NJ",
   "gas_pct": 59.13,
+  "hood_pct_default": 19.0,
+  "hood_presence": 0.3873,
   "house_weights": {
    "AH-1": 0.028076,
    "AH-21": 0.027609,
@@ -1498,6 +1558,8 @@
   "central_ac_pct": 57.6,
   "code": "NM",
   "gas_pct": 50.75,
+  "hood_pct_default": 23.7,
+  "hood_presence": 0.4845,
   "house_weights": {
    "AH-1": 0.007007,
    "AH-21": 0.011867,
@@ -1549,6 +1611,8 @@
   "central_ac_pct": 69.6,
   "code": "NV",
   "gas_pct": 47.1,
+  "hood_pct_default": 27.8,
+  "hood_presence": 0.5679,
   "house_weights": {
    "AH-1": 0.011289,
    "AH-21": 0.014224,
@@ -1599,6 +1663,8 @@
   "central_ac_pct": 45.8,
   "code": "NY",
   "gas_pct": 52.13,
+  "hood_pct_default": 16.5,
+  "hood_presence": 0.3365,
   "house_weights": {
    "AH-1": 0.023222,
    "AH-21": 0.01371,
@@ -1650,6 +1716,8 @@
   "central_ac_pct": 56.9,
   "code": "OH",
   "gas_pct": 42.69,
+  "hood_pct_default": 19.5,
+  "hood_presence": 0.398,
   "house_weights": {
    "AH-1": 0.011502,
    "AH-21": 0.015541,
@@ -1701,6 +1769,8 @@
   "central_ac_pct": 82.8,
   "code": "OK",
   "gas_pct": 34.98,
+  "hood_pct_default": 22.6,
+  "hood_presence": 0.4619,
   "house_weights": {
    "AH-1": 0.004081,
    "AH-21": 0.007158,
@@ -1750,6 +1820,8 @@
   "central_ac_pct": 23.7,
   "code": "OR",
   "gas_pct": 14.72,
+  "hood_pct_default": 22.0,
+  "hood_presence": 0.4487,
   "house_weights": {
    "AH-1": 0.011516,
    "AH-21": 0.015295,
@@ -1801,6 +1873,8 @@
   "central_ac_pct": 55.3,
   "code": "PA",
   "gas_pct": 49.07,
+  "hood_pct_default": 18.2,
+  "hood_presence": 0.372,
   "house_weights": {
    "AH-1": 0.05069,
    "AH-21": 0.069453,
@@ -1852,6 +1926,8 @@
   "central_ac_pct": 49.8,
   "code": "RI",
   "gas_pct": 45.5,
+  "hood_pct_default": 17.3,
+  "hood_presence": 0.3521,
   "house_weights": {
    "AH-1": 0.01191,
    "AH-21": 0.009109,
@@ -1901,6 +1977,8 @@
   "central_ac_pct": 87.2,
   "code": "SC",
   "gas_pct": 23.07,
+  "hood_pct_default": 25.1,
+  "hood_presence": 0.513,
   "house_weights": {
    "AH-1": 0.005469,
    "AH-21": 0.011447,
@@ -1951,6 +2029,8 @@
   "central_ac_pct": 47.4,
   "code": "SD",
   "gas_pct": 28.53,
+  "hood_pct_default": 21.9,
+  "hood_presence": 0.4464,
   "house_weights": {
    "AH-1": 0.008469,
    "AH-21": 0.011435,
@@ -2000,6 +2080,8 @@
   "central_ac_pct": 79.9,
   "code": "TN",
   "gas_pct": 16.58,
+  "hood_pct_default": 24.0,
+  "hood_presence": 0.4888,
   "house_weights": {
    "AH-1": 0.006479,
    "AH-21": 0.0105,
@@ -2049,6 +2131,8 @@
   "central_ac_pct": 85.9,
   "code": "TX",
   "gas_pct": 27.86,
+  "hood_pct_default": 25.5,
+  "hood_presence": 0.5204,
   "house_weights": {
    "AH-1": 0.005738,
    "AH-21": 0.00884,
@@ -2099,6 +2183,8 @@
   "central_ac_pct": 64.5,
   "code": "US",
   "gas_pct": 37.12,
+  "hood_pct_default": 22.0,
+  "hood_presence": 0.449,
   "house_weights": {
    "AH-1": 0.017955,
    "AH-21": 0.018988,
@@ -2150,6 +2236,8 @@
   "central_ac_pct": 52.9,
   "code": "UT",
   "gas_pct": 23.65,
+  "hood_pct_default": 25.1,
+  "hood_presence": 0.5128,
   "house_weights": {
    "AH-1": 0.013674,
    "AH-21": 0.022583,
@@ -2200,6 +2288,8 @@
   "central_ac_pct": 77.8,
   "code": "VA",
   "gas_pct": 17.25,
+  "hood_pct_default": 23.6,
+  "hood_presence": 0.4814,
   "house_weights": {
    "AH-1": 0.028897,
    "AH-21": 0.042342,
@@ -2249,6 +2339,8 @@
   "central_ac_pct": 39.9,
   "code": "VT",
   "gas_pct": 32.19,
+  "hood_pct_default": 20.2,
+  "hood_presence": 0.4121,
   "house_weights": {
    "AH-1": 0.008986,
    "AH-21": 0.011439,
@@ -2298,6 +2390,8 @@
   "central_ac_pct": 26.9,
   "code": "WA",
   "gas_pct": 14.34,
+  "hood_pct_default": 23.1,
+  "hood_presence": 0.4711,
   "house_weights": {
    "AH-1": 0.009717,
    "AH-21": 0.01368,
@@ -2349,6 +2443,8 @@
   "central_ac_pct": 43.1,
   "code": "WI",
   "gas_pct": 34.88,
+  "hood_pct_default": 20.4,
+  "hood_presence": 0.4156,
   "house_weights": {
    "AH-1": 0.012887,
    "AH-21": 0.01529,
@@ -2399,6 +2495,8 @@
   "central_ac_pct": 64.4,
   "code": "WV",
   "gas_pct": 18.83,
+  "hood_pct_default": 20.9,
+  "hood_presence": 0.4263,
   "house_weights": {
    "AH-1": 0.004805,
    "AH-21": 0.009022,
@@ -2450,6 +2548,8 @@
   "central_ac_pct": 45.3,
   "code": "WY",
   "gas_pct": 26.96,
+  "hood_pct_default": 22.5,
+  "hood_presence": 0.4602,
   "house_weights": {
    "AH-1": 0.009847,
    "AH-21": 0.016707,

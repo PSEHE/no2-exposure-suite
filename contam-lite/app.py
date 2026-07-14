@@ -542,7 +542,8 @@ elif panel == "Population & health":
     base_gas = prof["gas_pct"]
     gas_default = int(round(base_gas))   # slider start; baseline aligns to it
     base_no2 = prof["outdoor_no2_ppb"]
-    BASE_HOOD_PCT = 22          # paper-default effective-hood adoption
+    # Jurisdiction's effective-range-hood baseline (vintage proxy; US = paper's 22%)
+    BASE_HOOD_PCT = int(round(prof.get("hood_pct_default", 22)))
 
     # Per-jurisdiction widget keys: Streamlit keeps a keyed slider's value across
     # reruns (frontend included), so a shared key would keep DISPLAYING the prior
@@ -557,10 +558,13 @@ elif panel == "Population & health":
                        "that baseline.")
     gas_pct = st.sidebar.slider("Gas/propane cooking prevalence (%)", 0, 100,
                                 gas_default, key=kg)
-    hood_pct = st.sidebar.slider("Homes with effective vented ventilation (%)", 0, 100,
-                                 BASE_HOOD_PCT, key=kh,
-                                 help="Effective vented range-hood / kitchen-exhaust "
-                                      "adoption. A ventilation standard raises this.")
+    hood_pct = st.sidebar.slider(
+        "Homes with an effective range hood (vented + regularly used) (%)",
+        0, 100, BASE_HOOD_PCT, key=kh,
+        help="Share of homes whose range hood is vented outdoors AND actually used "
+             "during cooking (so it removes NO₂). A ventilation standard raises this. "
+             "Baseline is a housing-vintage proxy — new homes are far likelier to have "
+             "a vented hood; no survey measures this at state level.")
     out_no2 = st.sidebar.slider("Outdoor NO₂ (ppb)", 0.0, 40.0, float(round(base_no2, 1)),
                                 0.5, key=kn,
                                 help="Ambient NO₂ from traffic/outdoor sources. Affects "
@@ -615,7 +619,8 @@ elif panel == "Population & health":
     hp = prof["housing_pct"]
     st.caption(
         f"**{prof['population']:,}** people · **{hh_base:,.0f}** gas-cooking households · "
-        f"gas/propane **{base_gas:.0f}%** · outdoor NO₂ **{base_no2:.1f} ppb** · housing "
+        f"gas/propane **{base_gas:.0f}%** · effective range hood **{BASE_HOOD_PCT}%** · "
+        f"outdoor NO₂ **{base_no2:.1f} ppb** · housing "
         f"{hp['Detached']:.0f}% detached / {hp['Multifamily']:.0f}% multifamily / "
         f"{hp['Manufactured']:.0f}% manufactured. Structural + location context from the "
         "ZIP-level housing/climate data; behavior from the source paper.")
@@ -698,7 +703,10 @@ elif panel == "Population & health":
         "OR 1.32, Lin et al. 2013; mortality RR 1.02/10 µg·m⁻³, Atkinson et al.) scaled by "
         f"gas-household count × mean exposure; VSL ${vsl_m:.1f}M, asthma ${asthma_cost:,}/case. "
         "Stove-attributable; outdoor NO₂ sets total-exposure context only. State housing "
-        "sub-types are reconstructed from ZIP marginals (type split exact). — "
+        "sub-types are reconstructed from ZIP marginals (type split exact). Effective-hood "
+        "baseline is a housing-vintage proxy (LBNL: ~76–80% of post-2003 homes have a "
+        "vented hood, ~30% used effectively; no state-level survey exists), scaled so the "
+        "US average matches the paper's 22%. — "
         "Drafted by Claude with prompts engineered by Yannai Kashtan")
 
 
