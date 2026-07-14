@@ -196,11 +196,14 @@ def jurisdiction_burden(mean_stove_no2, n_gas_households, *,
     asthma_cost_usd = asthma * asthma_cost          # morbidity valuation
     mortality_cost_usd = deaths * vsl_usd           # VSL valuation
     cost = asthma_cost_usd + mortality_cost_usd
-    per_home = cost / n_gas_households if n_gas_households > 0 else 0.0
+    hh = n_gas_households if n_gas_households > 0 else 0.0
+    per_home = cost / hh if hh else 0.0
     return {"asthma_cases": asthma, "deaths": deaths,
             "asthma_cost_usd": asthma_cost_usd,
             "mortality_cost_usd": mortality_cost_usd,
             "cost_usd": cost, "cost_per_home": per_home,
+            "asthma_cost_per_home": asthma_cost_usd / hh if hh else 0.0,
+            "mortality_cost_per_home": mortality_cost_usd / hh if hh else 0.0,
             "mean_stove_no2": mean_stove_no2,
             "n_gas_households": n_gas_households}
 

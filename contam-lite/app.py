@@ -644,30 +644,27 @@ elif panel == "Population & health":
     st.subheader("Health cost avoided, per year")
     d_acost = b_base["asthma_cost_usd"] - b_pol["asthma_cost_usd"]
     d_mcost = b_base["mortality_cost_usd"] - b_pol["mortality_cost_usd"]
-    c1, c2, c3 = st.columns(3)
+    c1, c2 = st.columns(2)
     c1.metric("Asthma (morbidity)", f"{_usd(d_acost)}/yr")
     c1.caption(f"{_usd(b_base['asthma_cost_usd'])} → {_usd(b_pol['asthma_cost_usd'])}")
     c2.metric("Mortality (VSL)", f"{_usd(d_mcost)}/yr")
     c2.caption(f"{_usd(b_base['mortality_cost_usd'])} → {_usd(b_pol['mortality_cost_usd'])}")
-    c3.metric("Total", f"{_usd(d_cost)}/yr")
-    c3.caption(f"{_usd(b_base['cost_usd'])} → {_usd(b_pol['cost_usd'])}")
     st.caption("Mortality valuation (deaths × VSL) dwarfs asthma morbidity cost by ~1000× "
                "and carries the larger uncertainty — the split keeps the more-defensible "
                "asthma outcome legible.")
 
-    st.subheader("Cost per gas-cooking household")
-    # These two deltas ARE directional (real signed change, inverse-colored so a
-    # reduction reads green); shown only when the policy actually moves them, so
-    # there's no stray colored "0" at baseline.
+    st.subheader("Per gas-cooking household, per year")
     p1, p2, p3 = st.columns(3)
-    p1.metric("Baseline", f"${b_base['cost_per_home']:,.0f}/home·yr")
-    dph = b_pol["cost_per_home"] - b_base["cost_per_home"]
-    p2.metric("Under policy", f"${b_pol['cost_per_home']:,.0f}/home·yr",
-              delta=(f"{dph:,.0f}/home·yr" if abs(dph) >= 1 else None),
-              delta_color="inverse")
+    p1.metric("Asthma (morbidity)", f"${b_pol['asthma_cost_per_home']:,.0f}/home")
+    p1.caption(f"baseline ${b_base['asthma_cost_per_home']:,.0f} → "
+               f"${b_pol['asthma_cost_per_home']:,.0f}")
+    p2.metric("Mortality (VSL)", f"${b_pol['mortality_cost_per_home']:,.0f}/home")
+    p2.caption(f"baseline ${b_base['mortality_cost_per_home']:,.0f} → "
+               f"${b_pol['mortality_cost_per_home']:,.0f}")
     total_ltn2_base = mean_base + base_no2 * pen
     total_ltn2_pol = mean_pol + out_no2 * pen
     dtot = total_ltn2_pol - total_ltn2_base
+    # Directional delta (inverse-colored, green = lower), shown only when moved.
     p3.metric("Total long-term NO₂ (gas homes)", f"{total_ltn2_pol:.1f} ppb",
               delta=(f"{dtot:+.1f} ppb vs baseline" if abs(dtot) >= 0.05 else None),
               delta_color="inverse",
