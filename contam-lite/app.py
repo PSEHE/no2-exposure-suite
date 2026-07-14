@@ -101,6 +101,16 @@ COOKING_LEGEND = ("▲ middle: most households cook like this · "
                   "▲ lower and upper: about 5% of households cook like this")
 
 
+def _usd(x):
+    """Compact USD string, unit chosen by magnitude ($B / $M / $)."""
+    ax = abs(x)
+    if ax >= 1e9:
+        return f"${x/1e9:,.2f}B"
+    if ax >= 1e6:
+        return f"${x/1e6:,.0f}M"
+    return f"${x:,.0f}"
+
+
 @st.cache_resource
 def load_archetypes():
     with open(ROOT / "web_data" / "archetypes.json") as f:
@@ -603,19 +613,31 @@ elif panel == "Population & health":
         f"{hp['Manufactured']:.0f}% manufactured. Structural + location context from the "
         "ZIP-level housing/climate data; behavior from the source paper.")
 
-    # ---- headline: what the policy buys (avoided burden) ----
+    # ---- headline: what the policy buys (asthma leads) ----
     st.subheader("What this policy avoids, per year")
     if not changed:
         st.info("Move the **gas prevalence** or **ventilation** lever in the sidebar to "
                 "model a policy. The figures below then show the annual burden it avoids "
                 "versus the jurisdiction's current conditions.")
-    a1, a2, a3 = st.columns(3)
-    a1.metric("Adult deaths avoided", f"{d_deaths:,.0f}/yr",
-              delta=f"from {b_base['deaths']:,.0f} → {b_pol['deaths']:,.0f}")
-    a2.metric("Pediatric asthma cases avoided", f"{d_asthma:,.0f}/yr",
+    a1, a2 = st.columns(2)
+    a1.metric("Pediatric asthma cases avoided", f"{d_asthma:,.0f}/yr",
               delta=f"from {b_base['asthma_cases']:,.0f} → {b_pol['asthma_cases']:,.0f}")
-    a3.metric("Health cost avoided", f"${d_cost/1e9:,.2f}B/yr",
-              delta=f"from ${b_base['cost_usd']/1e9:,.1f}B → ${b_pol['cost_usd']/1e9:,.1f}B")
+    a2.metric("Adult deaths avoided", f"{d_deaths:,.0f}/yr",
+              delta=f"from {b_base['deaths']:,.0f} → {b_pol['deaths']:,.0f}")
+
+    st.subheader("Health cost avoided, per year")
+    d_acost = b_base["asthma_cost_usd"] - b_pol["asthma_cost_usd"]
+    d_mcost = b_base["mortality_cost_usd"] - b_pol["mortality_cost_usd"]
+    c1, c2, c3 = st.columns(3)
+    c1.metric("Asthma (morbidity)", f"{_usd(d_acost)}/yr",
+              delta=f"{_usd(b_base['asthma_cost_usd'])} → {_usd(b_pol['asthma_cost_usd'])}")
+    c2.metric("Mortality (VSL)", f"{_usd(d_mcost)}/yr",
+              delta=f"{_usd(b_base['mortality_cost_usd'])} → {_usd(b_pol['mortality_cost_usd'])}")
+    c3.metric("Total", f"{_usd(d_cost)}/yr",
+              delta=f"{_usd(b_base['cost_usd'])} → {_usd(b_pol['cost_usd'])}")
+    st.caption("Mortality valuation (deaths × VSL) dwarfs asthma morbidity cost by ~1000× "
+               "and carries the larger uncertainty — the split keeps the more-defensible "
+               "asthma outcome legible.")
 
     st.subheader("Cost per gas-cooking household")
     p1, p2, p3 = st.columns(3)
