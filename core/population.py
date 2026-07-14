@@ -55,18 +55,29 @@ def _norm(d):
     return {k: v / s for k, v in d.items()} if s > 0 else d
 
 
+def _temps_dist(climate=None, temps=None):
+    """A {TEMP: weight} distribution, from an explicit `temps` dict (jurisdiction)
+    or the CLIMATE_TEMP two-season fallback."""
+    if temps:
+        return _norm(temps)
+    wt, st = CLIMATE_TEMP.get(climate, ("COOL", "WARM"))
+    return {wt: 1.0} if wt == st else {wt: 0.5, st: 0.5}
+
+
 def population_mean_exposure(*, house_w=None, hood=None, use=None, window=None,
-                             climate="Mixed", wind=None, oc=None):
-    """Population-mean STOVE-attributable long-term NO2 (ppb), for homes with stoves."""
+                             climate="Mixed", wind=None, oc=None, temps=None):
+    """Population-mean STOVE-attributable long-term NO2 (ppb), for homes with stoves.
+
+    `temps` (a {TEMP: weight} dict) overrides the `climate` two-season fallback —
+    the jurisdiction panel passes the location's full seasonal temperature mix."""
     no2, _ = lib.load_library()
-    house_w = house_w or house_weights()
+    house_w = _norm(house_w or house_weights())
     hood = _norm(hood or DEF_HOOD)
     use = _norm(use or DEF_USE)
     window = _norm(window or DEF_WINDOW)
     wind = _norm(wind or DEF_WIND)
     oc = _norm(oc or DEF_OC)
-    wt, st = CLIMATE_TEMP.get(climate, ("COOL", "WARM"))
-    temps = {wt: 0.5} if wt == st else {wt: 0.5, st: 0.5}
+    temps = _temps_dist(climate, temps)
 
     total = 0.0
     for house, hw in house_w.items():
@@ -85,6 +96,71 @@ def population_mean_exposure(*, house_w=None, hood=None, use=None, window=None,
     return total
 
 
+def exposure_distribution(*, house_w=None, hood=None, use=None, window=None,
+                          climate="Mixed", wind=None, oc=None, temps=None):
+    """Population distribution of long-term stove NO2 across the housing stock.
+
+    Returns (values, weights): each cell of the reweighted library grid is one
+    exposure level, weighted by its joint population probability. Feed to a
+    weighted histogram to show the SPREAD of exposure (some homes far worse than
+    the mean) rather than just the mean. Same weighting as
+    population_mean_exposure, so the weighted mean of the returned arrays equals
+    that function's result."""
+    import numpy as np
+    no2, _ = lib.load_library()
+    house_w = _norm(house_w or house_weights())
+    hood = _norm(hood or DEF_HOOD)
+    use = _norm(use or DEF_USE)
+    window = _norm(window or DEF_WINDOW)
+    wind = _norm(wind or DEF_WIND)
+    oc = _norm(oc or DEF_OC)
+    temps = _temps_dist(climate, temps)
+
+    vals, wts = [], []
+    for house, hw in house_w.items():
+        if hw <= 0:
+            continue
+        for hd, ph in hood.items():
+            for u, pu in use.items():
+                for w, pw in window.items():
+                    for t, pt in temps.items():
+                        for wd, pwd in wind.items():
+                            for o, po in oc.items():
+                                pr = hw * ph * pu * pw * pt * pwd * po
+                                if pr <= 0:
+                                    continue
+                                k = lib.scenario_key(house, hd, u, w, t, wd, o)
+                                vals.append(no2[k]["dayavg"])
+                                wts.append(pr)
+    return np.array(vals), np.array(wts)
+
+
+def population_mean_penetration(*, house_w=None, window=None, wind=None,
+                                oc=None, temps=None, climate="Mixed"):
+    """Population-weighted indoor/outdoor NO2 penetration fraction (0..1).
+
+    From the CONTA dummy-tracer library (outdoor source, same physics as NO2):
+    conta/100 is the fraction of outdoor NO2 that reaches indoors. Penetration
+    is set by ventilation (house, window, temp, wind), effectively independent
+    of cooking, so hood/use are held at NoHood/med. Used to convert the outdoor
+    NO2 lever into an indoor total-exposure contribution."""
+    _, conta = lib.load_library()
+    house_w = _norm(house_w or house_weights())
+    window = _norm(window or DEF_WINDOW)
+    wind = _norm(wind or DEF_WIND)
+    oc = _norm(oc or DEF_OC)
+    temps = _temps_dist(climate, temps)
+    total = 0.0
+    for house, hw in house_w.items():
+        for w, pw in window.items():
+            for t, pt in temps.items():
+                for wd, pwd in wind.items():
+                    for o, po in oc.items():
+                        k = lib.scenario_key(house, "NoHood", "med", w, t, wd, o)
+                        total += conta[k]["dayavg"] / 100.0 * hw * pw * pt * pwd * po
+    return total
+
+
 @functools.lru_cache(maxsize=1)
 def baseline_exposure():
     return population_mean_exposure()
@@ -99,6 +175,29 @@ def health_outcomes(mean_stove_no2, gas_fraction):
     deaths = BASELINE_DEATHS * scale
     cost = deaths * C.VSL_USD + asthma * C.ASTHMA_COST_USD_PER_CASE_YR
     return {"asthma_cases": asthma, "deaths": deaths, "cost_usd": cost, "scale": scale}
+
+
+def jurisdiction_burden(mean_stove_no2, n_gas_households, *,
+                        vsl_usd=C.VSL_USD, asthma_cost=C.ASTHMA_COST_USD_PER_CASE_YR):
+    """Absolute health burden for a jurisdiction, by household-count scaling.
+
+    The papers' national burdens (BASELINE_ASTHMA_CASES / BASELINE_DEATHS) apply
+    at the national gas-household count and national baseline exposure. Scale
+    linearly by (this jurisdiction's gas households / national gas households)
+    and (this scenario's mean stove NO2 / national baseline exposure). VSL and
+    per-case asthma cost are exposed for sensitivity analysis."""
+    from . import jurisdiction as J
+    base = baseline_exposure()
+    natl_hh = J.national_gas_households()
+    scale = ((n_gas_households / natl_hh if natl_hh > 0 else 0.0)
+             * (mean_stove_no2 / base if base > 0 else 0.0))
+    asthma = BASELINE_ASTHMA_CASES * scale
+    deaths = BASELINE_DEATHS * scale
+    cost = deaths * vsl_usd + asthma * asthma_cost
+    per_home = cost / n_gas_households if n_gas_households > 0 else 0.0
+    return {"asthma_cases": asthma, "deaths": deaths, "cost_usd": cost,
+            "cost_per_home": per_home, "mean_stove_no2": mean_stove_no2,
+            "n_gas_households": n_gas_households}
 
 
 # --- slider helpers: map intuitive controls to distributions ---

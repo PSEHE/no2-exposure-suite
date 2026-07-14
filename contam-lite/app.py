@@ -25,8 +25,8 @@ import streamlit as st
 # figures here are small, so the faster engine buys nothing.
 pio.json.config.default_engine = "json"
 
-from core import (config, constants, diagnostics as dg, prj, transport,
-                  population, persily, transform, apartments)
+from core import (config, constants, diagnostics as dg, jurisdiction as juris,
+                  prj, transport, population, persily, transform, apartments)
 
 st.set_page_config(page_title="CONTAM-Lite — NO₂ engine", layout="wide")
 
@@ -522,65 +522,154 @@ if panel == "Single home":
                    "benchmarks WHO/EPA 1-hr ≈ 100 ppb, WHO annual ≈ 5.3 ppb.")
 
 
-# ======================= POPULATION & HEALTH =======================
+# ================= POPULATION HEALTH & POLICY (jurisdiction CBA) =================
 elif panel == "Population & health":
-    st.sidebar.subheader("Population")
-    gas_pct = st.sidebar.slider("Homes cooking with gas/propane (%)", 0, 100, 38)
-    hood_adopt = st.sidebar.slider("Homes with an effective vented hood (%)", 0, 100, 22)
-    st.sidebar.subheader("Cooking")
-    POP_COOK_MAX = 2.0
-    cook_amt = st.sidebar.slider("Cooking amount (× typical household)",
-                                 0.0, POP_COOK_MAX, 1.0, 0.05, key="pop_ca")
-    st.sidebar.markdown(_cooking_marks_html(vmax=POP_COOK_MAX), unsafe_allow_html=True)
-    st.sidebar.caption(COOKING_LEGEND)
-    st.sidebar.subheader("Ventilation")
-    win_h = st.sidebar.slider("Window open time (hours/day)", 0.0, 24.0,
-                              population.DEF_WINDOW_MEAN_HOURS, 0.1, key="pop_wh")
-    st.sidebar.caption("Population-average window behavior (the library's window "
-                       "axis is an all-day category, so kitchen-only or "
-                       "cooking-timed opening isn't representable here — use the "
-                       "Single-home panel for those).")
-    size_shift = st.sidebar.slider("Home size (smaller ← → larger)", -1.0, 1.0, 0.0, 0.1)
-    climate = st.sidebar.selectbox("Climate", list(population.CLIMATE_TEMP), index=2)
+    # ---- jurisdiction sets the STRUCTURAL + location context ----
+    codes = juris.list_jurisdictions()
+    jcode = st.sidebar.selectbox("Jurisdiction", codes,
+                                 format_func=juris.display_name, key="j_code")
+    prof = juris.profile(jcode)
+    base_gas = prof["gas_pct"]
+    gas_default = int(round(base_gas))   # slider start; baseline aligns to it
+    base_no2 = prof["outdoor_no2_ppb"]
+    BASE_HOOD_PCT = 22          # paper-default effective-hood adoption
 
-    use_d, sub_light = population.use_from_amount(
-        cook_amt, tuple(t for _, _, t in COOKING_ANCHORS))
-    mean = population.population_mean_exposure(
-        house_w=population.home_size_weights(size_shift),
-        hood=population.hood_dist(hood_adopt / 100),
-        use=use_d, window=population.window_hours_dist(win_h),
-        climate=climate) * sub_light
-    gas_frac = gas_pct / 100
-    pop_mean = mean * gas_frac      # averaged over all homes (electric add 0 stove NO2)
-    out = population.health_outcomes(mean, gas_frac)
+    st.sidebar.subheader("Policy levers")
+    st.sidebar.caption(f"Defaults are **{juris.display_name(jcode)}**'s current conditions. "
+                       "Move a lever to model a policy; the headline shows the change from "
+                       "that baseline.")
+    gas_pct = st.sidebar.slider("Gas/propane cooking prevalence (%)", 0, 100,
+                                gas_default, key="j_gas")
+    hood_pct = st.sidebar.slider("Homes with effective vented ventilation (%)", 0, 100,
+                                 BASE_HOOD_PCT, key="j_hood",
+                                 help="Effective vented range-hood / kitchen-exhaust "
+                                      "adoption. A ventilation standard raises this.")
+    out_no2 = st.sidebar.slider("Outdoor NO₂ (ppb)", 0.0, 40.0, float(round(base_no2, 1)),
+                                0.5, key="j_no2",
+                                help="Ambient NO₂ from traffic/outdoor sources. Affects "
+                                     "total exposure shown; the stove-attributable health "
+                                     "burden below is driven by the prevalence and "
+                                     "ventilation levers.")
+    with st.sidebar.expander("Cost & valuation assumptions"):
+        vsl_m = st.slider("Value of statistical life ($M)", 1.0, 20.0,
+                          constants.VSL_USD / 1e6, 0.1, key="j_vsl")
+        asthma_cost = st.number_input("Asthma cost ($/case·yr)", 500, 50000,
+                                      int(constants.ASTHMA_COST_USD_PER_CASE_YR), 100,
+                                      key="j_ac")
+    st.sidebar.caption("Cooking, window, and occupancy behavior are held at the source "
+                       "paper's national distributions; housing stock, climate, and wind "
+                       "come from the jurisdiction.")
 
-    st.title("Population NO₂ & health")
-    st.caption("Reweights the exact 86,400-scenario CONTAM library by population distributions; "
-               "health burdens scale the published national estimates with exposure × prevalence.")
-    c1, c2, c3 = st.columns(3)
-    c1.metric("Stove NO₂ (gas-stove homes)", f"{mean:.1f} ppb",
-              delta=f"{mean - WHO_ANNUAL:.1f} vs WHO annual", delta_color="inverse")
-    c2.metric("Stove NO₂ (whole population)", f"{pop_mean:.1f} ppb")
-    c3.metric("Gas/propane prevalence", f"{gas_pct}%")
-    st.divider()
-    h1, h2, h3 = st.columns(3)
-    h1.metric("Pediatric asthma cases", f"{out['asthma_cases']:,.0f}/yr")
-    h2.metric("Adult deaths", f"{out['deaths']:,.0f}/yr")
-    h3.metric("Societal cost", f"${out['cost_usd']/1e9:,.0f}B/yr")
+    # ---- exposure + burden: baseline (jurisdiction) vs policy (levers) ----
+    hw, temps, wind = prof["house_weights"], prof["temps"], prof["wind"]
 
-    fig = go.Figure()
-    fig.add_trace(go.Bar(x=["Stove NO₂ (gas-stove homes)"], y=[mean],
-                         marker_color="#e8743b", name="stove NO₂"))
-    fig.add_hline(y=WHO_ANNUAL, line_dash="dash", line_color="#2f9e57",
-                  annotation_text="WHO annual (5.3 ppb)")
-    fig.update_layout(yaxis_title="long-term NO₂ (ppb)", height=320,
-                      margin=dict(l=10, r=10, t=10, b=10), showlegend=False)
-    st.plotly_chart(fig, use_container_width=True)
+    @st.cache_data(show_spinner=False)
+    def _pop_mean(code, hood_pct):
+        return population.population_mean_exposure(
+            house_w=hw, temps=temps, wind=wind,
+            hood=population.hood_dist(hood_pct / 100))
+
+    @st.cache_data(show_spinner=False)
+    def _pop_dist(code, hood_pct):
+        return population.exposure_distribution(
+            house_w=hw, temps=temps, wind=wind,
+            hood=population.hood_dist(hood_pct / 100))
+
+    @st.cache_data(show_spinner=False)
+    def _pen(code):
+        return population.population_mean_penetration(house_w=hw, temps=temps, wind=wind)
+
+    mean_base = _pop_mean(jcode, BASE_HOOD_PCT)
+    mean_pol = _pop_mean(jcode, hood_pct)
+    pen = _pen(jcode)
+
+    hh_base = juris.gas_households(jcode, gas_default / 100)
+    hh_pol = juris.gas_households(jcode, gas_pct / 100)
+    cost_kw = dict(vsl_usd=vsl_m * 1e6, asthma_cost=asthma_cost)
+    b_base = population.jurisdiction_burden(mean_base, hh_base, **cost_kw)
+    b_pol = population.jurisdiction_burden(mean_pol, hh_pol, **cost_kw)
+
+    d_deaths = b_base["deaths"] - b_pol["deaths"]
+    d_asthma = b_base["asthma_cases"] - b_pol["asthma_cases"]
+    d_cost = b_base["cost_usd"] - b_pol["cost_usd"]
+    changed = (gas_pct != gas_default) or (hood_pct != BASE_HOOD_PCT)
+
+    st.title(f"Population health & policy — {juris.display_name(jcode)}")
+    hp = prof["housing_pct"]
     st.caption(
-        "Asthma uses the gas-cooking odds ratio 1.32 (Lin, Brunekreef & Gehring 2013); mortality uses "
-        "RR 1.02 per 10 µg/m³ (Atkinson et al.); VSL $13.1M, asthma $5,300/case. Burdens are anchored to "
-        "the papers' central national estimates (≈50k asthma cases, ≈19k deaths at 38% prevalence) and "
-        "scaled linearly by modeled exposure × prevalence. — "
+        f"**{prof['population']:,}** people · **{hh_base:,.0f}** gas-cooking households · "
+        f"gas/propane **{base_gas:.0f}%** · outdoor NO₂ **{base_no2:.1f} ppb** · housing "
+        f"{hp['Detached']:.0f}% detached / {hp['Multifamily']:.0f}% multifamily / "
+        f"{hp['Manufactured']:.0f}% manufactured. Structural + location context from the "
+        "ZIP-level housing/climate data; behavior from the source paper.")
+
+    # ---- headline: what the policy buys (avoided burden) ----
+    st.subheader("What this policy avoids, per year")
+    if not changed:
+        st.info("Move the **gas prevalence** or **ventilation** lever in the sidebar to "
+                "model a policy. The figures below then show the annual burden it avoids "
+                "versus the jurisdiction's current conditions.")
+    a1, a2, a3 = st.columns(3)
+    a1.metric("Adult deaths avoided", f"{d_deaths:,.0f}/yr",
+              delta=f"from {b_base['deaths']:,.0f} → {b_pol['deaths']:,.0f}")
+    a2.metric("Pediatric asthma cases avoided", f"{d_asthma:,.0f}/yr",
+              delta=f"from {b_base['asthma_cases']:,.0f} → {b_pol['asthma_cases']:,.0f}")
+    a3.metric("Health cost avoided", f"${d_cost/1e9:,.2f}B/yr",
+              delta=f"from ${b_base['cost_usd']/1e9:,.1f}B → ${b_pol['cost_usd']/1e9:,.1f}B")
+
+    st.subheader("Cost per gas-cooking household")
+    p1, p2, p3 = st.columns(3)
+    p1.metric("Baseline", f"${b_base['cost_per_home']:,.0f}/home·yr")
+    p2.metric("Under policy", f"${b_pol['cost_per_home']:,.0f}/home·yr",
+              delta=f"{b_pol['cost_per_home'] - b_base['cost_per_home']:,.0f}",
+              delta_color="inverse")
+    total_ltn2_base = mean_base + base_no2 * pen
+    total_ltn2_pol = mean_pol + out_no2 * pen
+    p3.metric("Total long-term NO₂ (gas homes)", f"{total_ltn2_pol:.1f} ppb",
+              delta=f"{total_ltn2_pol - total_ltn2_base:+.1f} vs baseline",
+              delta_color="inverse",
+              help="Stove-attributable + outdoor penetration. Compared to WHO annual "
+                   f"{WHO_ANNUAL:.1f} ppb.")
+
+    # ---- exposure spread across the housing stock (baseline vs policy) ----
+    st.subheader("Exposure spread across homes")
+    vb, wb = _pop_dist(jcode, BASE_HOOD_PCT)
+    vp, wp = _pop_dist(jcode, hood_pct)
+    edges = np.linspace(0, float(max(vb.max(), vp.max())) * 1.02, 45)
+    hb, _ = np.histogram(vb, bins=edges, weights=wb)
+    hp_, _ = np.histogram(vp, bins=edges, weights=wp)
+    ctr = (edges[:-1] + edges[1:]) / 2
+    vent_changed = hood_pct != BASE_HOOD_PCT     # only ventilation shifts the spread
+    figd = go.Figure()
+    figd.add_trace(go.Bar(x=ctr, y=hb / hb.sum() * 100, name="baseline",
+                          marker_color="#9aa0a6", opacity=0.75))
+    if vent_changed:
+        figd.add_trace(go.Bar(x=ctr, y=hp_ / hp_.sum() * 100, name="under policy",
+                              marker_color="#4063d8", opacity=0.6))
+    figd.add_vline(x=mean_base, line_dash="dot", line_color="#5f6368",
+                   annotation_text=f"baseline mean {mean_base:.1f}",
+                   annotation_position="top left", annotation_yshift=10)
+    if changed and abs(mean_pol - mean_base) > 0.05:   # ventilation shifted the spread
+        figd.add_vline(x=mean_pol, line_dash="dash", line_color="#4063d8",
+                       annotation_text=f"policy mean {mean_pol:.1f}",
+                       annotation_position="bottom right")
+    figd.add_vline(x=WHO_ANNUAL, line_color="#2f9e57",
+                   annotation_text=f"WHO annual {WHO_ANNUAL:.1f}",
+                   annotation_position="top right", annotation_yshift=10)
+    figd.update_layout(barmode="overlay", xaxis_title="long-term stove NO₂ (ppb)",
+                       yaxis_title="% of gas-cooking homes", height=340,
+                       margin=dict(l=10, r=10, t=10, b=10),
+                       legend=dict(orientation="h", yanchor="bottom", y=1.02))
+    st.plotly_chart(figd, use_container_width=True)
+    st.caption(
+        "Distribution of long-term stove NO₂ across the jurisdiction's gas-cooking homes "
+        "(reweighting the exact 86,400-scenario CONTAM library by the local housing mix, "
+        "climate, and wind). The spread — not just the mean — shows the fraction of homes "
+        "well above guideline. Burden = the papers' national estimates (gas-cooking asthma "
+        "OR 1.32, Lin et al. 2013; mortality RR 1.02/10 µg·m⁻³, Atkinson et al.) scaled by "
+        f"gas-household count × mean exposure; VSL ${vsl_m:.1f}M, asthma ${asthma_cost:,}/case. "
+        "Stove-attributable; outdoor NO₂ sets total-exposure context only. State housing "
+        "sub-types are reconstructed from ZIP marginals (type split exact). — "
         "Drafted by Claude with prompts engineered by Yannai Kashtan")
 
 
